@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="a" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7EB1DD"/>
+      <stop offset="1" stop-color="#5277C3"/>
+    </linearGradient>
+    <linearGradient id="b" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#5277C3"/>
+      <stop offset="1" stop-color="#7EB1DD"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="128" height="128" rx="24" fill="#1F2937"/>
+
+  <!-- A stylised nix snowflake: three lambda arms mirrored into six. -->
+  <g transform="translate(64 62) scale(1.02)" stroke-linecap="round" stroke-linejoin="round">
+    <g fill="none" stroke-width="9">
+      <g stroke="url(#a)">
+        <path d="M0 -38 L0 -12"/>
+        <path d="M-33 19 L-11 6"/>
+        <path d="M33 19 L11 6"/>
+      </g>
+      <g stroke="url(#b)">
+        <path d="M0 38 L0 12"/>
+        <path d="M33 -19 L11 -6"/>
+        <path d="M-33 -19 L-11 -6"/>
+      </g>
+    </g>
+    <g fill="none" stroke="#93C5FD" stroke-width="7" opacity="0.9">
+      <path d="M-11 6 L0 -12 L11 6 Z"/>
+    </g>
+  </g>
+
+  <!-- Small wrench mark, marking this as the manager rather than nix itself. -->
+  <g transform="translate(88 88)">
+    <circle r="22" fill="#111827" opacity="0.85"/>
+    <path d="M-9 8 L2 -3 a8 8 0 1 1 5 5 L-4 13 a3.5 3.5 0 0 1 -5 -5 Z"
+          fill="#F3F4F6"/>
+  </g>
+</svg>

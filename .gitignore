@@ -1,0 +1,13 @@
+# Build output
+/build/
+/build-*/
+result
+result-*
+
+# Editors / tooling
+/.cache/
+/.direnv/
+compile_commands.json
+.clangd/
+*.user
+*.swp
