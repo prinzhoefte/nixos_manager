@@ -1,5 +1,6 @@
 #include "PackagesPage.h"
 
+#include "Theme.h"
 #include "core/ConfigProject.h"
 #include "core/NixFile.h"
 
@@ -68,6 +69,8 @@ void PackagesPage::buildUi()
     queryRow->addWidget(m_query, 1);
 
     m_searchButton = new QPushButton(tr("Search"), searchSide);
+    m_searchButton->setIcon(Theme::icon(QStringLiteral("search"), Theme::colors().textOnBrand));
+    Theme::makePrimary(m_searchButton);
     connect(m_searchButton, &QPushButton::clicked, this, &PackagesPage::runSearch);
     queryRow->addWidget(m_searchButton);
     searchLayout->addLayout(queryRow);
@@ -96,7 +99,9 @@ void PackagesPage::buildUi()
 
     m_details = new QTextBrowser(searchSide);
     m_details->setOpenExternalLinks(true);
+    m_details->document()->setDefaultStyleSheet(Theme::richTextCss());
     m_details->setMaximumHeight(170);
+    m_details->setPlaceholderText(tr("Select a result to see its details."));
     searchLayout->addWidget(m_details);
 
     auto *addRow = new QHBoxLayout;
@@ -105,6 +110,8 @@ void PackagesPage::buildUi()
     m_targetBox->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     addRow->addWidget(m_targetBox, 1);
     m_addButton = new QPushButton(tr("Add package"), searchSide);
+    m_addButton->setIcon(Theme::icon(QStringLiteral("add"), Theme::colors().textOnBrand));
+    Theme::makePrimary(m_addButton);
     m_addButton->setEnabled(false);
     connect(m_addButton, &QPushButton::clicked, this, &PackagesPage::addSelectedPackage);
     addRow->addWidget(m_addButton);
@@ -116,7 +123,9 @@ void PackagesPage::buildUi()
     auto *installedSide = new QWidget(splitter);
     auto *instLayout = new QVBoxLayout(installedSide);
     instLayout->setContentsMargins(6, 6, 6, 6);
-    instLayout->addWidget(new QLabel(tr("<b>Packages in this configuration</b>"), installedSide));
+    auto *installedCaption = new QLabel(tr("Packages in this configuration"), installedSide);
+    Theme::makeEyebrow(installedCaption);
+    instLayout->addWidget(installedCaption);
 
     m_installedFilter = new QLineEdit(installedSide);
     m_installedFilter->setPlaceholderText(tr("Filter…"));
@@ -128,8 +137,10 @@ void PackagesPage::buildUi()
     m_installed = new QTreeWidget(installedSide);
     m_installed->setColumnCount(2);
     m_installed->setHeaderLabels({ tr("Package"), tr("Note") });
-    m_installed->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    m_installed->header()->setStretchLastSection(true);
+    m_installed->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_installed->header()->setSectionResizeMode(1, QHeaderView::Interactive);
+    m_installed->header()->resizeSection(1, 150);
+    m_installed->header()->setStretchLastSection(false);
     m_installed->setAlternatingRowColors(true);
     connect(m_installed, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item, int) {
         const QString path = item->data(0, kRoleAbsPath).toString();
@@ -154,6 +165,8 @@ void PackagesPage::buildUi()
     instButtons->addWidget(m_toggleButton);
 
     m_removeButton = new QPushButton(tr("Remove"), installedSide);
+    m_removeButton->setIcon(Theme::icon(QStringLiteral("trash")));
+    m_removeButton->setProperty("danger", true);
     m_removeButton->setEnabled(false);
     connect(m_removeButton, &QPushButton::clicked, this, &PackagesPage::removeSelectedInstalled);
     instButtons->addWidget(m_removeButton);
@@ -372,7 +385,7 @@ void PackagesPage::reloadInstalled()
             QTreeWidgetItem *listItem = fileItem;
             if (lists.size() > 1) {
                 listItem = new QTreeWidgetItem(fileItem, { l->path });
-                listItem->setForeground(0, palette().placeholderText());
+                listItem->setForeground(0, Theme::colors().accent);
                 listItem->setExpanded(true);
             }
             for (const PackageEntry &e : l->entries) {
@@ -387,7 +400,8 @@ void PackagesPage::reloadInstalled()
                     QFont f2 = item->font(0);
                     f2.setStrikeOut(true);
                     item->setFont(0, f2);
-                    item->setForeground(0, palette().placeholderText());
+                    item->setIcon(0, Theme::dot(Theme::colors().amber));
+                    item->setForeground(0, Theme::colors().textMuted);
                 }
                 ++total;
             }
@@ -457,6 +471,19 @@ void PackagesPage::toggleSelectedInstalled()
 
     emit statusMessage(enabled ? tr("Commented out %1").arg(expr) : tr("Re-enabled %1").arg(expr));
     emit configModified();
+    reloadInstalled();
+}
+
+void PackagesPage::applyTheme()
+{
+    m_details->document()->setDefaultStyleSheet(Theme::richTextCss());
+    const ThemeColors &c = Theme::colors();
+    m_searchButton->setIcon(Theme::icon(QStringLiteral("search"), c.textOnBrand));
+    m_addButton->setIcon(Theme::icon(QStringLiteral("add"), c.textOnBrand));
+    m_removeButton->setIcon(Theme::icon(QStringLiteral("trash")));
+    Theme::makePrimary(m_searchButton);
+    Theme::makePrimary(m_addButton);
+    onResultSelected();
     reloadInstalled();
 }
 

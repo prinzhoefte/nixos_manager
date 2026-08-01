@@ -1,5 +1,6 @@
 #include "ModulesPage.h"
 
+#include "Theme.h"
 #include "core/ConfigProject.h"
 #include "core/NixFile.h"
 
@@ -93,6 +94,8 @@ void ModulesPage::buildUi()
 
     auto *buttons = new QHBoxLayout;
     auto *create = new QPushButton(tr("New module…"), left);
+    create->setIcon(Theme::icon(QStringLiteral("add"), Theme::colors().textOnBrand));
+    Theme::makePrimary(create);
     connect(create, &QPushButton::clicked, this, &ModulesPage::createModule);
     buttons->addWidget(create);
     buttons->addStretch(1);
@@ -110,6 +113,7 @@ void ModulesPage::buildUi()
     m_title->setTextInteractionFlags(Qt::TextSelectableByMouse);
     header->addWidget(m_title, 1);
     m_open = new QPushButton(tr("Open in editor"), right);
+    m_open->setIcon(Theme::icon(QStringLiteral("editor")));
     m_open->setEnabled(false);
     connect(m_open, &QPushButton::clicked, this, [this] {
         auto *item = m_tree->currentItem();
@@ -124,6 +128,7 @@ void ModulesPage::buildUi()
 
     m_details = new QTextBrowser(right);
     m_details->setOpenExternalLinks(true);
+    m_details->document()->setDefaultStyleSheet(Theme::richTextCss());
     rightLayout->addWidget(m_details, 1);
 
     splitter->addWidget(right);
@@ -156,7 +161,7 @@ void ModulesPage::refresh()
         const int uses = hostsUsing(m.absPath).size();
         item->setText(1, uses > 0 ? QString::number(uses) : QStringLiteral("–"));
         if (uses == 0)
-            item->setForeground(0, palette().placeholderText());
+            item->setForeground(0, Theme::colors().textMuted);
         if (m.absPath == previous)
             toSelect = item;
     }
@@ -234,9 +239,13 @@ void ModulesPage::onSelectionChanged()
     }
 
     const QString rel = QDir(m_ctx.project->root()).relativeFilePath(path);
-    m_title->setText(QStringLiteral("<b>%1</b><br><small>%2</small>")
-                         .arg(QFileInfo(path).completeBaseName().toHtmlEscaped(),
-                             rel.toHtmlEscaped()));
+    const ThemeColors &tc = Theme::colors();
+    m_title->setText(
+        QStringLiteral("<div style='font-size:13pt;font-weight:800;color:%1;'>%2</div>"
+                       "<div style='font-size:8.5pt;color:%3;'>%4</div>")
+            .arg(tc.dark ? tc.lightBlue.name() : tc.primary.name(),
+                QFileInfo(path).completeBaseName().toHtmlEscaped(), tc.textMuted.name(),
+                rel.toHtmlEscaped()));
 
     QString html;
     const QStringList users = hostsUsing(path);
@@ -404,6 +413,13 @@ void ModulesPage::createModule()
     emit statusMessage(tr("Created %1").arg(QDir(m_ctx.project->root()).relativeFilePath(absPath)));
     emit configModified();
     emit openFileRequested(absPath);
+}
+
+void ModulesPage::applyTheme()
+{
+    m_details->document()->setDefaultStyleSheet(Theme::richTextCss());
+    m_open->setIcon(Theme::icon(QStringLiteral("editor")));
+    refresh();
 }
 
 } // namespace nixm

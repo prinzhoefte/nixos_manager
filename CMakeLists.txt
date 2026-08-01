@@ -50,6 +50,10 @@ if(NIXOS_MANAGER_BUILD_GUI)
         src/main.cpp
         src/ui/MainWindow.cpp
         src/ui/MainWindow.h
+        src/ui/Theme.cpp
+        src/ui/Theme.h
+        src/ui/BrandHeader.cpp
+        src/ui/BrandHeader.h
         src/ui/NixHighlighter.cpp
         src/ui/NixHighlighter.h
         src/ui/LogPane.cpp

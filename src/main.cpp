@@ -1,9 +1,11 @@
 #include "ui/MainWindow.h"
+#include "ui/Theme.h"
 
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QIcon>
 #include <QNetworkProxyFactory>
+#include <QSettings>
 
 int main(int argc, char **argv)
 {
@@ -18,9 +20,16 @@ int main(int argc, char **argv)
     // package search works on networks that require one.
     QNetworkProxyFactory::setUseSystemConfiguration(true);
 
-    QIcon::setThemeName(QIcon::themeName());
-    if (QIcon::hasThemeIcon(QStringLiteral("org.nixos.manager")))
-        QApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral("org.nixos.manager")));
+    // The JR-IT palette, typography and widget style. Everything built after
+    // this point picks it up automatically.
+    const QString themeSetting
+        = QSettings().value(QStringLiteral("appearance/theme"), QStringLiteral("system"))
+              .toString();
+    nixm::Theme::apply(&app,
+        themeSetting == QLatin1String("dark")    ? nixm::Theme::Dark
+            : themeSetting == QLatin1String("light") ? nixm::Theme::Light
+                                                     : nixm::Theme::System);
+    QApplication::setWindowIcon(nixm::Theme::logo());
 
     QCommandLineParser parser;
     parser.setApplicationDescription(

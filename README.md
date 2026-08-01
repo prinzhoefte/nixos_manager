@@ -65,6 +65,27 @@ optimise pass.
 Every privileged command is shown in full before it runs, and escalation goes
 through `pkexec` (or `sudo -n`, configurable in *Tools ▸ Settings*).
 
+## Look and feel
+
+The interface follows the **JR-IT Services** corporate design: Manrope, the
+blue scale from ink `#042C53` through primary `#0C447C` to accent `#378ADD`,
+and amber `#F4A93C` used only where something wants your attention — the
+unsaved-changes marker, a module that is present but commented out, and the
+currently active system generation. Roughly the 70 / 20 / 10 blue / neutral /
+accent split the guide asks for.
+
+Both a light and a dark variant ship; the app follows your desktop on first
+start and *View ▸ Toggle light / dark theme* (`Ctrl+Shift+T`) switches, with the
+choice remembered.
+
+Everything is drawn at runtime with `QPainter` — the logo, the tab and button
+icons, the check marks, the chevrons — so the app needs neither an installed
+icon theme nor Qt's SVG plugin, and every glyph picks up the current palette.
+
+Manrope is not bundled. If it is not installed the app falls back to Inter,
+Cantarell or your system sans and still looks consistent; the NixOS module
+installs it for you (see `installBrandFont` below).
+
 ## Installing
 
 ### Try it without installing
@@ -115,6 +136,7 @@ Module options:
 | `programs.nixos-manager.package` | this flake's build | Override the package. |
 | `programs.nixos-manager.configPath` | `null` | Sets `NIXOS_MANAGER_CONFIG`. |
 | `programs.nixos-manager.installPolkitAgent` | `true` | Enables `security.polkit`, which `pkexec` needs. |
+| `programs.nixos-manager.installBrandFont` | `true` | Adds Manrope to `fonts.packages` (only that family, not all of google-fonts). |
 
 ### As an overlay
 
@@ -142,12 +164,25 @@ entirely.
 
 ## Building from source
 
+On NixOS, either entry point gives you the same toolchain:
+
 ```sh
-nix develop            # or install qt6 + cmake + ninja yourself
+nix-shell              # shell.nix, uses your <nixpkgs> channel
+nix develop            # the flake devShell, uses the pinned nixpkgs
+```
+
+Both put Qt 6, CMake, Ninja, clangd and gdb on `PATH`, and point `QT_PLUGIN_PATH`
+at Qt's plugins so `./build/nixos-manager` runs straight out of the build tree
+without `wrapQtAppsHook`. Then:
+
+```sh
 cmake -S . -B build -G Ninja
 cmake --build build
 ./build/nixos-manager /etc/nixos
 ```
+
+`nix-shell --arg withFonts false` skips pulling in Manrope if you would rather
+not build it.
 
 Requirements: Qt 6.4 or newer (`QtWidgets`, `QtNetwork`), CMake 3.21, a C++17
 compiler.
@@ -171,6 +206,10 @@ The interesting part is `src/core`, which has no UI dependency:
 | `CommandRunner.{h,cpp}` | Sequences external commands, merges their output, handles privilege escalation and cancellation. |
 | `SystemOps.{h,cpp}` | Builds the argument lists for rebuilds, generations, flake updates and cleanup. Runs nothing itself. |
 
+And on the UI side, `src/ui/Theme.{h,cpp}` holds the whole visual system: the
+two palettes, the generated stylesheet, a `QProxyStyle` that paints check marks
+and radio buttons in brand colours, and the runtime-painted logo and icon set.
+
 Because mutation is range-based rather than print-based, the app never
 reformats a file it did not need to touch.
 
@@ -182,8 +221,8 @@ reformats a file it did not need to touch.
 | `NIXOS_MANAGER_SEARCH_URL` | Alternative package index endpoint (default `https://search.nixos.org/backend`). |
 | `NIXOS_MANAGER_SEARCH_USER` / `_PASSWORD` | Credentials for that endpoint. |
 
-Settings (privilege helper, cache lifetime, recent trees, window layout) live in
-`~/.config/nixos-manager/nixos-manager.conf`.
+Settings (theme, privilege helper, cache lifetime, recent trees, window layout)
+live in `~/.config/nixos-manager/nixos-manager.conf`.
 
 ## Limitations
 

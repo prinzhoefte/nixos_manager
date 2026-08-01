@@ -27,6 +27,7 @@ public:
 
 public slots:
     void refresh();
+    void applyTheme();
 
 signals:
     void openFileRequested(const QString &absPath);

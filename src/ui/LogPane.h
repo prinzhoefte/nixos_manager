@@ -21,6 +21,7 @@ class LogPane : public QWidget
 public:
     explicit LogPane(CommandRunner *runner, QWidget *parent = nullptr);
 
+    void applyTheme();
     void appendNote(const QString &text);
     void appendError(const QString &text);
     void clear();

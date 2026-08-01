@@ -1,6 +1,7 @@
 #include "EditorPage.h"
 
 #include "NixHighlighter.h"
+#include "Theme.h"
 #include "core/ConfigProject.h"
 #include "core/NixFile.h"
 
@@ -62,6 +63,8 @@ void EditorPage::buildUi()
     headerRow->addWidget(m_header, 1);
 
     m_reload = new QPushButton(tr("Discard changes"), right);
+    m_reload->setIcon(Theme::icon(QStringLiteral("reload")));
+    m_reload->setProperty("danger", true);
     m_reload->setToolTip(tr("Re-read this file from disk, throwing away unsaved edits."));
     m_reload->setEnabled(false);
     connect(m_reload, &QPushButton::clicked, this, &EditorPage::reloadFromDisk);
@@ -69,7 +72,10 @@ void EditorPage::buildUi()
     rightLayout->addLayout(headerRow);
 
     m_editor = new QPlainTextEdit(right);
-    m_editor->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    QFont code(Theme::monoFontFamily());
+    code.setPointSizeF(QApplication::font().pointSizeF() + 0.5);
+    m_editor->setFont(code);
+    m_editor->setProperty("mono", true);
     m_editor->setLineWrapMode(QPlainTextEdit::NoWrap);
     m_editor->setTabStopDistance(4 * m_editor->fontMetrics().horizontalAdvance(QLatin1Char(' ')));
     m_editor->setPlaceholderText(tr("Pick a file on the left to edit it."));
@@ -77,8 +83,7 @@ void EditorPage::buildUi()
     rightLayout->addWidget(m_editor, 1);
 
     m_highlighter = new NixHighlighter(m_editor->document());
-    const QColor base = m_editor->palette().color(QPalette::Base);
-    m_highlighter->setDarkMode(base.lightness() < 128);
+    m_highlighter->setDarkMode(Theme::isDark());
 
     // Editing pushes into the shared buffer, but only after the user pauses, so
     // we do not re-parse on every keystroke.
@@ -227,6 +232,15 @@ void EditorPage::reloadFromDisk()
     m_loading = false;
     emit statusMessage(tr("Reloaded %1").arg(QFileInfo(m_currentPath).fileName()));
     emit configModified();
+}
+
+void EditorPage::applyTheme()
+{
+    m_highlighter->setDarkMode(Theme::isDark());
+    QFont code(Theme::monoFontFamily());
+    code.setPointSizeF(QApplication::font().pointSizeF() + 0.5);
+    m_editor->setFont(code);
+    m_reload->setIcon(Theme::icon(QStringLiteral("reload")));
 }
 
 } // namespace nixm
