@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=NixOS Manager
+GenericName=NixOS Configuration Manager
+Comment=Browse, edit and rebuild your NixOS configuration
+Exec=nixos-manager %f
+Icon=org.nixos.manager
+Terminal=false
+Categories=System;Settings;PackageManager;Qt;
+Keywords=nix;nixos;configuration;package;flake;rebuild;
+StartupNotify=true
+StartupWMClass=nixos-manager
+MimeType=inode/directory;
