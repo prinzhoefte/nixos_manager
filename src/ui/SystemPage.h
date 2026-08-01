@@ -29,6 +29,7 @@ public:
 
 public slots:
     void refresh();
+    void applyTheme();
     void refreshGenerations();
     void refreshFlakeInputs();
 

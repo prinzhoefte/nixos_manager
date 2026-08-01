@@ -11,6 +11,7 @@ class QTabWidget;
 
 namespace nixm {
 
+class BrandHeader;
 class EditorPage;
 class HostsPage;
 class LogPane;
@@ -47,9 +48,12 @@ private:
     void showAbout();
     void rememberRecent(const QString &path);
     void rebuildRecentMenu();
+    void toggleTheme();
+    void restyle();
 
     AppContext m_ctx;
 
+    BrandHeader *m_header = nullptr;
     QTabWidget *m_tabs = nullptr;
     HostsPage *m_hosts = nullptr;
     ModulesPage *m_modules = nullptr;

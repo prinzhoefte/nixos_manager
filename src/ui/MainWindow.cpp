@@ -1,11 +1,13 @@
 #include "MainWindow.h"
 
+#include "BrandHeader.h"
 #include "EditorPage.h"
 #include "HostsPage.h"
 #include "LogPane.h"
 #include "ModulesPage.h"
 #include "PackagesPage.h"
 #include "SystemPage.h"
+#include "Theme.h"
 #include "core/CommandRunner.h"
 #include "core/ConfigProject.h"
 #include "core/PackageSearch.h"
@@ -84,12 +86,32 @@ void MainWindow::buildUi()
     m_editor = new EditorPage(m_ctx, this);
     m_system = new SystemPage(m_ctx, this);
 
-    m_tabs->addTab(m_hosts, tr("&Hosts"));
-    m_tabs->addTab(m_modules, tr("&Modules"));
-    m_tabs->addTab(m_packages, tr("&Packages"));
-    m_tabs->addTab(m_editor, tr("&Editor"));
-    m_tabs->addTab(m_system, tr("&System"));
-    setCentralWidget(m_tabs);
+    m_tabs->addTab(m_hosts, Theme::icon(QStringLiteral("host")), tr("&Hosts"));
+    m_tabs->addTab(m_modules, Theme::icon(QStringLiteral("module")), tr("&Modules"));
+    m_tabs->addTab(m_packages, Theme::icon(QStringLiteral("package")), tr("&Packages"));
+    m_tabs->addTab(m_editor, Theme::icon(QStringLiteral("editor")), tr("&Editor"));
+    m_tabs->addTab(m_system, Theme::icon(QStringLiteral("system")), tr("&System"));
+    m_tabs->setIconSize(QSize(16, 16));
+
+    m_header = new BrandHeader(this);
+    connect(m_header, &BrandHeader::openRequested, this, &MainWindow::chooseProject);
+    connect(m_header, &BrandHeader::saveRequested, this, [this] { saveAll(); });
+    connect(m_header, &BrandHeader::reloadRequested, this, &MainWindow::reloadProject);
+    connect(m_header, &BrandHeader::themeToggleRequested, this, &MainWindow::toggleTheme);
+
+    auto *central = new QWidget(this);
+    auto *centralLayout = new QVBoxLayout(central);
+    centralLayout->setContentsMargins(0, 0, 0, 0);
+    centralLayout->setSpacing(0);
+    centralLayout->addWidget(m_header);
+
+    auto *tabHost = new QWidget(central);
+    auto *tabLayout = new QVBoxLayout(tabHost);
+    tabLayout->setContentsMargins(12, 8, 12, 10);
+    tabLayout->addWidget(m_tabs);
+    centralLayout->addWidget(tabHost, 1);
+
+    setCentralWidget(central);
 
     m_log = new LogPane(m_ctx.runner, this);
     m_logDock = new QDockWidget(tr("Command output"), this);
@@ -177,6 +199,10 @@ void MainWindow::buildActions()
 
     auto *viewMenu = menuBar()->addMenu(tr("&View"));
     viewMenu->addAction(m_logDock->toggleViewAction());
+    viewMenu->addSeparator();
+    auto *themeAction = viewMenu->addAction(tr("Toggle &light / dark theme"));
+    themeAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+T")));
+    connect(themeAction, &QAction::triggered, this, &MainWindow::toggleTheme);
 
     auto *toolsMenu = menuBar()->addMenu(tr("&Tools"));
     auto *settingsAction = toolsMenu->addAction(tr("&Settings…"));
@@ -191,14 +217,43 @@ void MainWindow::buildActions()
     auto *aboutAction = helpMenu->addAction(tr("&About"));
     connect(aboutAction, &QAction::triggered, this, &MainWindow::showAbout);
 
-    auto *toolbar = addToolBar(tr("Main"));
-    toolbar->setObjectName(QStringLiteral("mainToolBar"));
-    toolbar->setMovable(false);
-    toolbar->addAction(openAction);
-    toolbar->addAction(m_saveAction);
-    toolbar->addAction(m_reloadAction);
+    // The header carries the same three actions, so no separate tool bar.
+    openAction->setIcon(Theme::icon(QStringLiteral("open")));
+    m_saveAction->setIcon(Theme::icon(QStringLiteral("save")));
+    m_reloadAction->setIcon(Theme::icon(QStringLiteral("reload")));
 
     rebuildRecentMenu();
+}
+
+void MainWindow::toggleTheme()
+{
+    const Theme::Mode next = Theme::isDark() ? Theme::Light : Theme::Dark;
+    Theme::setMode(qApp, next);
+    QSettings().setValue(QStringLiteral("appearance/theme"),
+        next == Theme::Dark ? QStringLiteral("dark") : QStringLiteral("light"));
+    restyle();
+}
+
+void MainWindow::restyle()
+{
+    // Anything that bakes a colour into a pixmap or into rich text has to be
+    // rebuilt when the palette changes.
+    m_header->applyTheme();
+    m_tabs->setTabIcon(0, Theme::icon(QStringLiteral("host")));
+    m_tabs->setTabIcon(1, Theme::icon(QStringLiteral("module")));
+    m_tabs->setTabIcon(2, Theme::icon(QStringLiteral("package")));
+    m_tabs->setTabIcon(3, Theme::icon(QStringLiteral("editor")));
+    m_tabs->setTabIcon(4, Theme::icon(QStringLiteral("system")));
+    QApplication::setWindowIcon(Theme::logo());
+
+    m_hosts->applyTheme();
+    m_modules->applyTheme();
+    m_packages->applyTheme();
+    m_editor->applyTheme();
+    m_system->applyTheme();
+    m_log->applyTheme();
+
+    refreshAll();
 }
 
 void MainWindow::rebuildRecentMenu()
@@ -372,23 +427,25 @@ void MainWindow::updateWindowTitle()
     // needs it to be present.
     if (!m_ctx.project->isOpen()) {
         setWindowTitle(tr("NixOS Manager[*]"));
+        m_header->clearProject();
         m_statusPath->clear();
         return;
     }
     const QString kind = m_ctx.project->kind() == ConfigProject::Flake ? tr("flake")
                                                                       : tr("single file");
     setWindowTitle(tr("%1[*] — NixOS Manager").arg(m_ctx.project->root()));
-    m_statusPath->setText(tr("%1  ·  %2  ·  %3 host(s)  ·  %4")
-                              .arg(m_ctx.project->root(), kind)
-                              .arg(m_ctx.project->hosts().size())
-                              .arg(m_ctx.project->nixpkgsChannel()));
+    m_header->setProject(m_ctx.project->root(), kind, int(m_ctx.project->hosts().size()),
+        m_ctx.project->nixpkgsChannel());
+    m_statusPath->clear();
 }
 
 void MainWindow::updateDirtyState()
 {
-    const int dirty = m_ctx.project->dirtyFiles().size();
+    const int dirty = int(m_ctx.project->dirtyFiles().size());
     m_saveAction->setEnabled(dirty > 0);
-    m_statusDirty->setText(dirty > 0 ? tr("%n file(s) modified", nullptr, dirty) : QString());
+    m_header->setSaveEnabled(dirty > 0);
+    m_header->setDirtyCount(dirty);
+    m_statusDirty->clear();
     setWindowModified(dirty > 0);
 }
 

@@ -1,5 +1,6 @@
 #include "SystemPage.h"
 
+#include "Theme.h"
 #include "core/CommandRunner.h"
 #include "core/ConfigProject.h"
 
@@ -86,6 +87,8 @@ QWidget *SystemPage::buildRebuildGroup()
 
     auto *row = new QHBoxLayout;
     m_rebuildButton = new QPushButton(tr("Run rebuild"), group);
+    m_rebuildButton->setIcon(Theme::icon(QStringLiteral("run"), Theme::colors().textOnBrand));
+    Theme::makePrimary(m_rebuildButton);
     connect(m_rebuildButton, &QPushButton::clicked, this, &SystemPage::runRebuild);
     row->addWidget(m_rebuildButton);
     row->addStretch(1);
@@ -114,6 +117,7 @@ QWidget *SystemPage::buildGenerationsGroup()
 
     auto *row = new QHBoxLayout;
     auto *refreshButton = new QPushButton(tr("Refresh"), group);
+    refreshButton->setIcon(Theme::icon(QStringLiteral("reload")));
     connect(refreshButton, &QPushButton::clicked, this, &SystemPage::refreshGenerations);
     row->addWidget(refreshButton);
 
@@ -122,6 +126,8 @@ QWidget *SystemPage::buildGenerationsGroup()
     row->addWidget(m_rollbackButton);
 
     m_deleteGenButton = new QPushButton(tr("Delete selected"), group);
+    m_deleteGenButton->setIcon(Theme::icon(QStringLiteral("trash")));
+    m_deleteGenButton->setProperty("danger", true);
     connect(m_deleteGenButton, &QPushButton::clicked, this, &SystemPage::runDeleteGenerations);
     row->addWidget(m_deleteGenButton);
     row->addStretch(1);
@@ -142,7 +148,10 @@ QWidget *SystemPage::buildFlakeGroup()
     m_inputs->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_inputs->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_inputs->verticalHeader()->setVisible(false);
+    m_inputs->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     m_inputs->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    m_inputs->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    m_inputs->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     m_inputs->setAlternatingRowColors(true);
     m_inputs->setMaximumHeight(160);
     layout->addWidget(m_inputs);
@@ -215,6 +224,8 @@ QWidget *SystemPage::buildCleanupGroup()
 
     auto *row = new QHBoxLayout;
     m_cleanupButton = new QPushButton(tr("Run cleanup"), group);
+    m_cleanupButton->setIcon(Theme::icon(QStringLiteral("broom"), Theme::colors().textOnBrand));
+    Theme::makePrimary(m_cleanupButton);
     connect(m_cleanupButton, &QPushButton::clicked, this, &SystemPage::runCleanup);
     row->addWidget(m_cleanupButton);
 
@@ -272,15 +283,16 @@ void SystemPage::refreshGenerations()
             QFont f = number->font();
             f.setBold(true);
             number->setFont(f);
+            number->setIcon(Theme::dot(Theme::colors().amber));
         }
         m_generations->setItem(row, 0, number);
         m_generations->setItem(row, 1, new QTableWidgetItem(g.date));
         m_generations->setItem(row, 2, new QTableWidgetItem(g.nixosVersion));
         m_generations->setItem(row, 3, new QTableWidgetItem(g.kernel));
     }
-    m_generations->resizeColumnsToContents();
-
     const bool any = !generations.isEmpty();
+    if (any)
+        m_generations->resizeColumnsToContents();
     m_rollbackButton->setEnabled(any);
     m_deleteGenButton->setEnabled(any);
     if (!any) {
@@ -310,7 +322,7 @@ void SystemPage::refreshFlakeInputs()
         m_inputs->setItem(row, 2, new QTableWidgetItem(lock.first));
         m_inputs->setItem(row, 3, new QTableWidgetItem(lock.second));
     }
-    m_inputs->resizeColumnToContents(0);
+
 }
 
 void SystemPage::startRebuildFor(const QString &host)
@@ -471,6 +483,17 @@ void SystemPage::runCleanup()
     }
 
     m_ctx.runner->run(steps);
+}
+
+void SystemPage::applyTheme()
+{
+    const ThemeColors &c = Theme::colors();
+    m_rebuildButton->setIcon(Theme::icon(QStringLiteral("run"), c.textOnBrand));
+    m_cleanupButton->setIcon(Theme::icon(QStringLiteral("broom"), c.textOnBrand));
+    m_deleteGenButton->setIcon(Theme::icon(QStringLiteral("trash")));
+    Theme::makePrimary(m_rebuildButton);
+    Theme::makePrimary(m_cleanupButton);
+    refreshGenerations();
 }
 
 } // namespace nixm

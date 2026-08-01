@@ -1,5 +1,6 @@
 #include "HostsPage.h"
 
+#include "Theme.h"
 #include "core/ConfigProject.h"
 #include "core/NixFile.h"
 
@@ -34,6 +35,18 @@ QString statusText(bool present, bool enabled)
     return enabled ? QObject::tr("active") : QObject::tr("commented out");
 }
 
+/// Colour of the dot in the Status column. Amber flags "present but switched
+/// off", which is the state worth noticing at a glance.
+QColor statusColour(bool present, bool enabled, bool global)
+{
+    const ThemeColors &c = Theme::colors();
+    if (global)
+        return c.accent;
+    if (!present)
+        return c.line;
+    return enabled ? c.success : c.amber;
+}
+
 } // namespace
 
 HostsPage::HostsPage(const AppContext &ctx, QWidget *parent)
@@ -55,7 +68,9 @@ void HostsPage::buildUi()
     auto *left = new QWidget(splitter);
     auto *leftLayout = new QVBoxLayout(left);
     leftLayout->setContentsMargins(6, 6, 6, 6);
-    leftLayout->addWidget(new QLabel(tr("<b>Hosts</b>"), left));
+    auto *hostsCaption = new QLabel(tr("Hosts"), left);
+    Theme::makeEyebrow(hostsCaption);
+    leftLayout->addWidget(hostsCaption);
 
     m_hostList = new QListWidget(left);
     connect(m_hostList, &QListWidget::currentRowChanged, this, [this](int) { onHostSelected(); });
@@ -92,6 +107,7 @@ void HostsPage::buildUi()
     m_entryLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     entryRow->addWidget(m_entryLabel, 1);
     m_openHostFile = new QPushButton(tr("Open in editor"), identity);
+    m_openHostFile->setIcon(Theme::icon(QStringLiteral("editor")));
     connect(m_openHostFile, &QPushButton::clicked, this, [this] {
         const HostInfo *h = m_ctx.project->host(currentHost());
         if (h)
@@ -99,6 +115,8 @@ void HostsPage::buildUi()
     });
     entryRow->addWidget(m_openHostFile);
     m_rebuild = new QPushButton(tr("Rebuild this host…"), identity);
+    m_rebuild->setIcon(Theme::icon(QStringLiteral("run"), Theme::colors().textOnBrand));
+    Theme::makePrimary(m_rebuild);
     connect(m_rebuild, &QPushButton::clicked, this,
         [this] { emit rebuildRequested(currentHost()); });
     entryRow->addWidget(m_rebuild);
@@ -328,6 +346,9 @@ void HostsPage::reloadModuleTree()
         auto *item = new QTreeWidgetItem(parent);
         item->setText(0, m.name);
         item->setText(1, global ? tr("active on every host") : statusText(present, enabled));
+        item->setIcon(1, Theme::dot(statusColour(present, enabled, global)));
+        if (!present && !global)
+            item->setForeground(1, Theme::colors().textMuted);
         item->setText(2, m.relPath);
         item->setData(0, kRoleAbsPath, m.absPath);
         item->setData(0, kRoleCategory, m.category);
@@ -377,6 +398,7 @@ void HostsPage::reloadModuleTree()
         auto *item = new QTreeWidgetItem(others);
         item->setText(0, QFileInfo(e.text).fileName());
         item->setText(1, statusText(true, e.enabled));
+        item->setIcon(1, Theme::dot(statusColour(true, e.enabled, false)));
         item->setText(2, e.text);
         item->setData(0, kRoleAbsPath, QFileInfo::exists(abs) ? abs : QString());
         item->setData(0, kRoleImportLiteral, e.text);
@@ -387,10 +409,14 @@ void HostsPage::reloadModuleTree()
     m_updating = false;
     applyModuleFilter(m_moduleFilter->text());
 
-    m_summary->setText(tr("<b>%1</b><br>%2 active module(s)<br>%3")
-                           .arg(host->name)
-                           .arg(active)
-                           .arg(host->relEntry));
+    const ThemeColors &c = Theme::colors();
+    m_summary->setText(
+        QStringLiteral("<div style='font-size:12pt;font-weight:800;color:%1;'>%2</div>"
+                       "<div style='color:%3;font-size:9pt;margin-top:2px;'>%4</div>"
+                       "<div style='color:%5;font-size:8.5pt;margin-top:4px;'>%6</div>")
+            .arg(c.dark ? c.lightBlue.name() : c.primary.name(), host->name.toHtmlEscaped(),
+                c.accent.name(), tr("%n active module(s)", nullptr, active),
+                c.textMuted.name(), host->relEntry.toHtmlEscaped()));
 }
 
 void HostsPage::applyModuleFilter(const QString &text)
@@ -613,6 +639,14 @@ void HostsPage::commitIdentity()
         emit statusMessage(tr("Updated identity of %1").arg(host->name));
         emit configModified();
     }
+}
+
+void HostsPage::applyTheme()
+{
+    m_rebuild->setIcon(Theme::icon(QStringLiteral("run"), Theme::colors().textOnBrand));
+    Theme::makePrimary(m_rebuild);
+    m_openHostFile->setIcon(Theme::icon(QStringLiteral("editor")));
+    reloadHostDetails();
 }
 
 } // namespace nixm

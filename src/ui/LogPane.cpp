@@ -1,5 +1,6 @@
 #include "LogPane.h"
 
+#include "Theme.h"
 #include "core/CommandRunner.h"
 
 #include <QApplication>
@@ -37,6 +38,8 @@ LogPane::LogPane(CommandRunner *runner, QWidget *parent)
     bar->addWidget(m_progress);
 
     m_cancel = new QPushButton(tr("Cancel"), this);
+    m_cancel->setIcon(Theme::icon(QStringLiteral("cancel")));
+    m_cancel->setProperty("danger", true);
     m_cancel->setEnabled(false);
     connect(m_cancel, &QPushButton::clicked, m_runner, &CommandRunner::cancel);
     bar->addWidget(m_cancel);
@@ -56,7 +59,8 @@ LogPane::LogPane(CommandRunner *runner, QWidget *parent)
     m_output = new QPlainTextEdit(this);
     m_output->setReadOnly(true);
     m_output->setMaximumBlockCount(20000);
-    m_output->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    m_output->setFont(QFont(Theme::monoFontFamily()));
+    m_output->setProperty("mono", true);
     m_output->setLineWrapMode(QPlainTextEdit::NoWrap);
     m_output->setPlaceholderText(
         tr("Output from nixos-rebuild, garbage collection and flake updates appears here."));
@@ -110,31 +114,34 @@ void LogPane::appendHtmlLine(const QString &html)
 
 void LogPane::appendNote(const QString &text)
 {
-    appendHtmlLine(QStringLiteral("<span style='color:#3b82f6'>%1</span>").arg(text.toHtmlEscaped()));
+    appendHtmlLine(QStringLiteral("<span style='color:%1'>%2</span>")
+                       .arg(Theme::colors().accent.name(), text.toHtmlEscaped()));
 }
 
 void LogPane::appendError(const QString &text)
 {
-    appendHtmlLine(QStringLiteral("<span style='color:#ef4444'><b>%1</b></span>")
-                       .arg(text.toHtmlEscaped()));
+    appendHtmlLine(QStringLiteral("<span style='color:%1'><b>%2</b></span>")
+                       .arg(Theme::colors().danger.name(), text.toHtmlEscaped()));
 }
 
 void LogPane::onStepStarted(const QString &label, const QString &commandLine)
 {
     Q_UNUSED(label);
-    appendHtmlLine(QStringLiteral("<span style='color:#3b82f6'><b>$ %1</b></span>")
-                       .arg(commandLine.toHtmlEscaped()));
+    appendHtmlLine(QStringLiteral("<span style='color:%1'><b>$ %2</b></span>")
+                       .arg(Theme::colors().accent.name(), commandLine.toHtmlEscaped()));
     m_status->setText(tr("Running: %1").arg(label));
 }
 
 void LogPane::onStepFinished(const QString &label, int exitCode)
 {
     if (exitCode == 0) {
-        appendHtmlLine(QStringLiteral("<span style='color:#22c55e'>✓ %1</span>")
-                           .arg(tr("%1 finished").arg(label).toHtmlEscaped()));
+        appendHtmlLine(QStringLiteral("<span style='color:%1'>✓ %2</span>")
+                           .arg(Theme::colors().success.name(),
+                               tr("%1 finished").arg(label).toHtmlEscaped()));
     } else {
-        appendHtmlLine(QStringLiteral("<span style='color:#ef4444'><b>✗ %1</b></span>")
-                           .arg(tr("%1 failed with exit code %2").arg(label).arg(exitCode)
+        appendHtmlLine(QStringLiteral("<span style='color:%1'><b>✗ %2</b></span>")
+                           .arg(Theme::colors().danger.name(),
+                               tr("%1 failed with exit code %2").arg(label).arg(exitCode)
                                    .toHtmlEscaped()));
     }
 }
@@ -145,6 +152,12 @@ void LogPane::onRunningChanged(bool running)
     m_progress->setVisible(running);
     if (!running)
         m_status->setText(tr("Idle"));
+}
+
+void LogPane::applyTheme()
+{
+    m_output->setFont(QFont(Theme::monoFontFamily()));
+    m_cancel->setIcon(Theme::icon(QStringLiteral("cancel")));
 }
 
 } // namespace nixm

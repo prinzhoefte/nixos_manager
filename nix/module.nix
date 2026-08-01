@@ -45,12 +45,28 @@ in
         environments ship one, minimal window managers usually do not.
       '';
     };
+
+    installBrandFont = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Install Manrope, the JR-IT brand typeface the interface is designed
+        around. Without it the app falls back to Inter, Cantarell or whatever
+        sans your system provides, which works but looks slightly off.
+
+        Only the Manrope family is built, not the whole google-fonts set.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
     environment.systemPackages = [ cfg.package ];
 
     security.polkit.enable = lib.mkIf cfg.installPolkitAgent true;
+
+    fonts.packages = lib.mkIf cfg.installBrandFont [
+      (pkgs.google-fonts.override { fonts = [ "Manrope" ]; })
+    ];
 
     environment.sessionVariables = lib.mkIf (cfg.configPath != null) {
       NIXOS_MANAGER_CONFIG = cfg.configPath;

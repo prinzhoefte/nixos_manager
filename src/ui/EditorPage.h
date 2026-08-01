@@ -31,6 +31,7 @@ public:
 
 public slots:
     void refresh();
+    void applyTheme();
     /// Re-reads the buffer when another page changed it.
     void syncFromBuffer();
 
