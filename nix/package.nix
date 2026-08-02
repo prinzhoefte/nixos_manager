@@ -30,6 +30,9 @@ stdenv.mkDerivation (finalAttrs: {
 
   buildInputs = [
     qt6.qtbase
+    # Renders the brand mark, which is shipped as artwork rather than drawn in
+    # code.
+    qt6.qtsvg
     # Without this the app falls back to XWayland on a Wayland session.
     qt6.qtwayland
   ];

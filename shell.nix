@@ -40,6 +40,7 @@ pkgs.mkShell {
   buildInputs =
     (with pkgs; [
       qt6.qtbase
+      qt6.qtsvg # renders the brand mark
       qt6.qtwayland # native Wayland session rather than XWayland
     ])
     ++ pkgs.lib.optional withFonts manrope;

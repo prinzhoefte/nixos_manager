@@ -45,7 +45,7 @@ target_compile_definitions(nixos-manager-core PUBLIC
 
 # ── Application ───────────────────────────────────────────────────────────────
 if(NIXOS_MANAGER_BUILD_GUI)
-    find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets)
+    find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets Svg)
     qt_standard_project_setup()
 
     qt_add_executable(nixos-manager
@@ -75,7 +75,26 @@ if(NIXOS_MANAGER_BUILD_GUI)
         src/ui/SystemPage.cpp
         src/ui/SystemPage.h
     )
-    target_link_libraries(nixos-manager PRIVATE nixos-manager-core Qt6::Widgets)
+    # The brand mark is shipped as artwork and rendered at runtime, rather than
+    # being reimplemented in painting code. Drop a replacement at
+    # share/icons/logo.svg (or logo.png) and rebuild to use your own file.
+    set(NIXOS_MANAGER_LOGO share/icons/org.nixos.manager.svg)
+    foreach(candidate share/icons/logo.svg share/icons/logo.png)
+        if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${candidate})
+            set(NIXOS_MANAGER_LOGO ${candidate})
+        endif()
+    endforeach()
+    message(STATUS "nixos-manager: using ${NIXOS_MANAGER_LOGO} as the application logo")
+
+    get_filename_component(_logo_ext ${NIXOS_MANAGER_LOGO} EXT)
+    qt_add_resources(nixos-manager "branding"
+        PREFIX "/branding"
+        BASE ${CMAKE_CURRENT_SOURCE_DIR}
+        FILES ${NIXOS_MANAGER_LOGO})
+    target_compile_definitions(nixos-manager PRIVATE
+        NIXOS_MANAGER_LOGO_RESOURCE=":/branding/${NIXOS_MANAGER_LOGO}")
+
+    target_link_libraries(nixos-manager PRIVATE nixos-manager-core Qt6::Widgets Qt6::Svg)
 
     install(TARGETS nixos-manager RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     install(FILES share/applications/org.nixos.manager.desktop

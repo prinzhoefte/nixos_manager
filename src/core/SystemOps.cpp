@@ -8,7 +8,10 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
+#include <QStandardPaths>
 #include <QVersionNumber>
+
+#include <sys/stat.h>
 
 namespace nixm {
 namespace SystemOps {
@@ -74,16 +77,57 @@ CommandRunner::Step rebuild(RebuildAction action, const QString &root, const QSt
     return s;
 }
 
-QVector<Generation> listGenerations()
+namespace {
+
+/// Modification time of the link itself, not of what it points at. Store paths
+/// all carry the epoch, so following the symlink would give a useless date.
+QDateTime symlinkModified(const QString &path)
+{
+    struct stat info;
+    if (::lstat(QFile::encodeName(path).constData(), &info) != 0)
+        return QDateTime();
+    return QDateTime::fromSecsSinceEpoch(info.st_mtime);
+}
+
+void fillGenerationDetails(Generation *g)
+{
+    const QString link
+        = QStringLiteral("%1-%2-link").arg(QLatin1String(kSystemProfile)).arg(g->number);
+
+    QFile versionFile(link + QStringLiteral("/nixos-version"));
+    if (versionFile.open(QIODevice::ReadOnly | QIODevice::Text))
+        g->nixosVersion = QString::fromUtf8(versionFile.readAll()).trimmed();
+
+    const QFileInfo kernel(link + QStringLiteral("/kernel"));
+    if (kernel.isSymLink()) {
+        // /nix/store/<hash>-linux-6.12.1/bzImage -> "linux-6.12.1"
+        static const QRegularExpression kre(QStringLiteral("-(linux[^/]*?)(?:/|$)"));
+        const auto km = kre.match(kernel.symLinkTarget());
+        if (km.hasMatch())
+            g->kernel = km.captured(1);
+    }
+}
+
+/// Fallback for layouts the directory scan does not understand.
+QVector<Generation> listGenerationsViaNixEnv(QString *diagnostic)
 {
     QVector<Generation> out;
+    if (QStandardPaths::findExecutable(QStringLiteral("nix-env")).isEmpty()) {
+        if (diagnostic)
+            *diagnostic = QObject::tr("nix-env is not on PATH.");
+        return out;
+    }
+
     int exitCode = 0;
     const QString text = CommandRunner::captureOutput(QStringLiteral("nix-env"),
         { QStringLiteral("--list-generations"), QStringLiteral("--profile"),
             QLatin1String(kSystemProfile) },
         QString(), 30000, &exitCode);
-    if (exitCode != 0)
+    if (exitCode != 0) {
+        if (diagnostic)
+            *diagnostic = text.trimmed();
         return out;
+    }
 
     static const QRegularExpression re(
         QStringLiteral(R"(^\s*(\d+)\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s*(\(current\))?)"));
@@ -96,23 +140,66 @@ QVector<Generation> listGenerations()
         g.number = m.captured(1).toInt();
         g.date = m.captured(2);
         g.current = !m.captured(3).isEmpty();
-
-        const QString link
-            = QStringLiteral("%1-%2-link").arg(QLatin1String(kSystemProfile)).arg(g.number);
-        QFile versionFile(link + QStringLiteral("/nixos-version"));
-        if (versionFile.open(QIODevice::ReadOnly | QIODevice::Text))
-            g.nixosVersion = QString::fromUtf8(versionFile.readAll()).trimmed();
-        const QFileInfo kernel(link + QStringLiteral("/kernel"));
-        if (kernel.isSymLink()) {
-            // /nix/store/<hash>-linux-6.12.1/bzImage -> "linux-6.12.1"
-            const QString target = kernel.symLinkTarget();
-            static const QRegularExpression kre(QStringLiteral("-(linux[^/]*?)(?:/|$)"));
-            const auto km = kre.match(target);
-            if (km.hasMatch())
-                g.kernel = km.captured(1);
-        }
+        fillGenerationDetails(&g);
         out.push_back(g);
     }
+    return out;
+}
+
+} // namespace
+
+QVector<Generation> listGenerations(QString *diagnostic)
+{
+    QVector<Generation> out;
+    if (diagnostic)
+        diagnostic->clear();
+
+    const QFileInfo profileInfo{ QLatin1String(kSystemProfile) };
+    const QDir profileDir = profileInfo.absoluteDir();
+    if (!profileDir.exists()) {
+        if (diagnostic)
+            *diagnostic = QObject::tr("%1 does not exist — this machine is not running NixOS.")
+                              .arg(profileDir.absolutePath());
+        return out;
+    }
+
+    // `system` points at the live generation, e.g. "system-621-link".
+    int currentNumber = -1;
+    static const QRegularExpression linkRe(QStringLiteral("^system-(\\d+)-link$"));
+    const QString currentTarget = QFileInfo(QLatin1String(kSystemProfile)).symLinkTarget();
+    if (!currentTarget.isEmpty()) {
+        const auto m = linkRe.match(QFileInfo(currentTarget).fileName());
+        if (m.hasMatch())
+            currentNumber = m.captured(1).toInt();
+    }
+
+    const auto entries = profileDir.entryInfoList({ QStringLiteral("system-*-link") },
+        QDir::AllEntries | QDir::System | QDir::NoDotAndDotDot);
+    for (const QFileInfo &entry : entries) {
+        const auto m = linkRe.match(entry.fileName());
+        if (!m.hasMatch())
+            continue;
+        Generation g;
+        g.number = m.captured(1).toInt();
+        const QDateTime built = symlinkModified(entry.absoluteFilePath());
+        if (built.isValid())
+            g.date = built.toString(QStringLiteral("yyyy-MM-dd hh:mm:ss"));
+        g.current = g.number == currentNumber;
+        fillGenerationDetails(&g);
+        out.push_back(g);
+    }
+
+    if (out.isEmpty()) {
+        QString fallbackDiagnostic;
+        out = listGenerationsViaNixEnv(&fallbackDiagnostic);
+        if (out.isEmpty() && diagnostic) {
+            *diagnostic = fallbackDiagnostic.isEmpty()
+                ? QObject::tr("No system-*-link entries under %1.").arg(profileDir.absolutePath())
+                : fallbackDiagnostic;
+        }
+        return out;
+    }
+
     std::sort(out.begin(), out.end(),
         [](const Generation &a, const Generation &b) { return a.number > b.number; });
     return out;

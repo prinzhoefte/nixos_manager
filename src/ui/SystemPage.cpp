@@ -271,7 +271,8 @@ void SystemPage::refresh()
 
 void SystemPage::refreshGenerations()
 {
-    const auto generations = SystemOps::listGenerations();
+    QString diagnostic;
+    const auto generations = SystemOps::listGenerations(&diagnostic);
     m_generations->clearSpans();
     m_generations->setRowCount(generations.size());
     for (int row = 0; row < generations.size(); ++row) {
@@ -297,9 +298,11 @@ void SystemPage::refreshGenerations()
     m_deleteGenButton->setEnabled(any);
     if (!any) {
         m_generations->setRowCount(1);
-        auto *item = new QTableWidgetItem(
-            tr("No system profile found — is this machine running NixOS?"));
+        auto *item = new QTableWidgetItem(diagnostic.isEmpty()
+                ? tr("No system generations found.")
+                : tr("No system generations found — %1").arg(diagnostic));
         item->setFlags(Qt::NoItemFlags);
+        item->setToolTip(item->text());
         m_generations->setItem(0, 0, item);
         m_generations->setSpan(0, 0, 1, 4);
     }

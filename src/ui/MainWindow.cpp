@@ -28,6 +28,8 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QInputDialog>
+#include <QLineEdit>
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
@@ -41,6 +43,14 @@
 
 namespace nixm {
 namespace {
+
+QString currentUserName()
+{
+    const QByteArray fromEnv = qgetenv("USER");
+    if (!fromEnv.isEmpty())
+        return QString::fromLocal8Bit(fromEnv);
+    return QStringLiteral("root");
+}
 
 QStringList defaultProjectCandidates()
 {
@@ -66,6 +76,15 @@ MainWindow::MainWindow(QWidget *parent)
         = settings.value(QStringLiteral("system/escalationHelper")).toString();
     if (!helper.isEmpty())
         m_ctx.runner->setEscalationHelper(helper);
+
+    // sudo asks for a password; give it somewhere to ask.
+    m_ctx.runner->setPasswordPrompt([this](const QString &reason) {
+        bool accepted = false;
+        const QString password = QInputDialog::getText(this, tr("Authentication"),
+            reason + QStringLiteral("\n\n") + tr("Password for %1:").arg(currentUserName()),
+            QLineEdit::Password, QString(), &accepted);
+        return accepted ? password : QString();
+    });
 
     buildUi();
     buildActions();
@@ -487,8 +506,9 @@ void MainWindow::showSettings()
     const int index = helper->findText(m_ctx.runner->escalationHelper());
     if (index >= 0)
         helper->setCurrentIndex(index);
-    helper->setToolTip(tr("pkexec asks for a password through your desktop's polkit agent. "
-                          "sudo is run with -n, so it only works if it needs no password."));
+    helper->setToolTip(tr("sudo asks for your password in a dialog, then caches it the way "
+                          "sudo normally does. pkexec goes through your desktop's polkit "
+                          "agent instead."));
     form->addRow(tr("Privilege helper:"), helper);
 
     auto *ttl = new QSpinBox(&dialog);

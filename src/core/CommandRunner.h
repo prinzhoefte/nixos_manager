@@ -3,6 +3,8 @@
 #include <QObject>
 #include <QProcess>
 #include <QQueue>
+
+#include <functional>
 #include <QString>
 #include <QStringList>
 
@@ -32,8 +34,13 @@ public:
     explicit CommandRunner(QObject *parent = nullptr);
     ~CommandRunner() override;
 
-    /// "pkexec", "sudo" or "none". Defaults to pkexec when it is on PATH.
+    /// "sudo", "pkexec" or "none". Defaults to sudo when it is on PATH.
     void setEscalationHelper(const QString &helper);
+
+    /// Supplies the sudo password when one is needed. The runner asks at most
+    /// once per batch, hands the answer straight to `sudo -v` and drops it; the
+    /// password is never placed on a command line or written to the log.
+    void setPasswordPrompt(std::function<QString(const QString &reason)> prompt);
     QString escalationHelper() const { return m_helper; }
     static QStringList availableEscalationHelpers();
 
@@ -60,6 +67,8 @@ signals:
 
 private:
     void startNext();
+    /// Returns false when sudo could not be authenticated and the batch must stop.
+    bool ensureSudoCredentials();
     void onReadyRead();
     void onFinished(int exitCode, QProcess::ExitStatus status);
     void finishBatch(bool ok);
@@ -69,6 +78,8 @@ private:
     QQueue<Step> m_queue;
     Step m_current;
     QString m_helper;
+    std::function<QString(const QString &)> m_passwordPrompt;
+    bool m_sudoReady = false;   // credentials cached for this batch
     bool m_cancelled = false;
     bool m_running = false;
 };

@@ -36,7 +36,13 @@ CommandRunner::Step rebuild(RebuildAction action, const QString &root, const QSt
     bool isFlake, const QStringList &extraArgs = {});
 
 /// Reads the system profile. Safe to call as a normal user.
-QVector<Generation> listGenerations();
+///
+/// The profile directory is read directly rather than shelling out to
+/// `nix-env`, so this works with no `nix` on PATH, in any locale, and from a
+/// desktop launcher with a minimal environment. `nix-env` is still tried as a
+/// fallback for unusual layouts. When nothing is found, `diagnostic` explains
+/// why instead of leaving the UI to guess.
+QVector<Generation> listGenerations(QString *diagnostic = nullptr);
 
 QVector<CommandRunner::Step> rollbackTo(int generation);
 CommandRunner::Step deleteGenerations(const QVector<int> &generations);

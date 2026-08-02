@@ -100,8 +100,12 @@ updates; and a cleanup panel that does what `nix-env --delete-generations old &&
 nix-collect-garbage -d` does, with a dry-run mode and an optional store
 optimise pass.
 
-Every privileged command is shown in full before it runs, and escalation goes
-through `pkexec` (or `sudo -n`, configurable in *Tools ▸ Settings*).
+Every privileged command is shown in full before it runs. Escalation uses
+**sudo** by default: the app asks for your password once per batch, hands it
+straight to `sudo -v` and forgets it, then runs each command with `sudo -n`
+against the timestamp sudo just cached. The password never reaches a command
+line or the log. `pkexec` is available instead under *Tools ▸ Settings* if you
+would rather go through your desktop's polkit agent.
 
 ## Look and feel
 
@@ -116,9 +120,18 @@ Both a light and a dark variant ship; the app follows your desktop on first
 start and *View ▸ Toggle light / dark theme* (`Ctrl+Shift+T`) switches, with the
 choice remembered.
 
-Everything is drawn at runtime with `QPainter` — the logo, the tab and button
-icons, the check marks, the chevrons — so the app needs neither an installed
-icon theme nor Qt's SVG plugin, and every glyph picks up the current palette.
+The brand mark is real artwork, rendered from `share/icons/org.nixos.manager.svg`
+rather than reimplemented in painting code. To use a different file, either drop
+it in as `share/icons/logo.svg` (or `logo.png`) and rebuild, or point
+`NIXOS_MANAGER_LOGO` at it — no rebuild needed:
+
+```sh
+NIXOS_MANAGER_LOGO=~/brand/jr-it.png nixos-manager
+```
+
+The tab and button icons, the check marks and the chevrons *are* drawn at
+runtime with `QPainter`, so they follow the palette and the app needs no
+installed icon theme.
 
 Manrope is not bundled. If it is not installed the app falls back to Inter,
 Cantarell or your system sans and still looks consistent; the NixOS module
@@ -175,6 +188,7 @@ Module options:
 | `programs.nixos-manager.configPath` | `null` | Sets `NIXOS_MANAGER_CONFIG`. |
 | `programs.nixos-manager.installPolkitAgent` | `true` | Enables `security.polkit`, which `pkexec` needs. |
 | `programs.nixos-manager.installBrandFont` | `true` | Adds Manrope to `fonts.packages` (only that family, not all of google-fonts). |
+| `programs.nixos-manager.logo` | `null` | A PNG or SVG to use as the app mark; sets `NIXOS_MANAGER_LOGO`. |
 
 ### Without flakes, on a plain configuration.nix
 
@@ -279,7 +293,7 @@ The interesting part is `src/core`, which has no UI dependency:
 | `ConfigProject.{h,cpp}` | Discovers hosts from `nixosConfigurations`, resolves each one's entry file, catalogues modules by category, reads flake inputs and the nixpkgs channel, and owns the shared file buffers. |
 | `PackageSearch.{h,cpp}` | Queries the search.nixos.org Elasticsearch index — packages and NixOS options — with an on-disk cache. Probes the index schema generation and remembers what answered, so an upstream bump does not break the app. |
 | `CommandRunner.{h,cpp}` | Sequences external commands, merges their output, handles privilege escalation and cancellation. |
-| `SystemOps.{h,cpp}` | Builds the argument lists for rebuilds, generations, flake updates and cleanup. Runs nothing itself. |
+| `SystemOps.{h,cpp}` | Builds the argument lists for rebuilds, flake updates and cleanup. Reads system generations straight out of `/nix/var/nix/profiles`, so it needs no `nix` on PATH and no particular locale; `nix-env` is only a fallback. |
 | `GitRepo.{h,cpp}` | Parses `git status --porcelain=v2`, diffs and log; builds the steps for staging, committing, syncing and initialising. Read-only queries are synchronous, everything that writes goes through CommandRunner. |
 
 And on the UI side, `src/ui/Theme.{h,cpp}` holds the whole visual system: the
@@ -296,6 +310,7 @@ reformats a file it did not need to touch.
 | `NIXOS_MANAGER_CONFIG` | Default configuration tree. |
 | `NIXOS_MANAGER_SEARCH_URL` | Alternative package index endpoint (default `https://search.nixos.org/backend`). |
 | `NIXOS_MANAGER_SEARCH_USER` / `_PASSWORD` | Credentials for that endpoint. |
+| `NIXOS_MANAGER_LOGO` | PNG or SVG to use as the application mark. |
 
 Settings (theme, privilege helper, cache lifetime, recent trees, window layout)
 live in `~/.config/nixos-manager/nixos-manager.conf`.

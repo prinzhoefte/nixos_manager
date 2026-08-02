@@ -63,9 +63,13 @@ public:
     static QString monoFontFamily();
     static bool brandFontAvailable();
 
-    /// The JR-IT mark: rounded tile, JR monogram, circuit traces, amber nodes.
+    /// The JR-IT mark, rendered from the shipped artwork rather than redrawn in
+    /// code. Override the file with $NIXOS_MANAGER_LOGO, or replace
+    /// share/icons/logo.svg (or .png) and rebuild.
     static QIcon logo();
     static QPixmap logoPixmap(int size, qreal devicePixelRatio = 1.0);
+    /// Path the mark is loaded from — a resource path unless overridden.
+    static QString logoSource();
 
     /// Flat line icons painted at runtime, so the app needs no icon theme and
     /// no SVG plugin.

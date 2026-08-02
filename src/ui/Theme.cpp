@@ -12,6 +12,7 @@
 #include <QStyleFactory>
 #include <QStandardPaths>
 #include <QStyleOption>
+#include <QSvgRenderer>
 #include <QWidget>
 
 namespace nixm {
@@ -763,57 +764,49 @@ ul     { margin-left: 6px; }
 
 QPixmap Theme::logoPixmap(int size, qreal devicePixelRatio)
 {
-    QPixmap pm(int(size * devicePixelRatio), int(size * devicePixelRatio));
+    const int pixels = int(size * devicePixelRatio);
+    QPixmap pm(pixels, pixels);
     pm.setDevicePixelRatio(devicePixelRatio);
     pm.fill(Qt::transparent);
 
     QPainter p(&pm);
     p.setRenderHint(QPainter::Antialiasing, true);
-    p.setRenderHint(QPainter::TextAntialiasing, true);
-    p.scale(size / 100.0, size / 100.0);
+    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
 
+    const QString path = logoSource();
+    if (path.endsWith(QLatin1String(".svg"), Qt::CaseInsensitive)) {
+        QSvgRenderer renderer(path);
+        if (renderer.isValid()) {
+            renderer.render(&p, QRectF(0, 0, size, size));
+            return pm;
+        }
+    } else {
+        QImage image(path);
+        if (!image.isNull()) {
+            p.drawImage(QRectF(0, 0, size, size),
+                image.scaled(pixels, pixels, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            return pm;
+        }
+    }
+
+    // The artwork could not be read. Rather than show an empty square, fall
+    // back to a plain brand tile so the window still has an identity.
     const ThemeColors &c = g_colors;
-
-    // Rounded tile with the brand gradient.
-    QLinearGradient tile(0, 0, 100, 100);
+    QLinearGradient tile(0, 0, size, size);
     tile.setColorAt(0.0, c.primary);
     tile.setColorAt(1.0, c.ink);
     p.setPen(Qt::NoPen);
     p.setBrush(tile);
-    p.drawRoundedRect(QRectF(0, 0, 100, 100), 23, 23);
-
-    // "JR" monogram. Manrope when it is installed, otherwise the fallback sans.
+    p.drawRoundedRect(QRectF(0, 0, size, size), size * 0.23, size * 0.23);
     QFont monogram(uiFontFamily());
-    monogram.setPixelSize(38);
+    // Weight 680 rather than Bold: Manrope's Bold is heavier than the mark
+    // wants. Size is relative so the fallback works at every icon size.
+    monogram.setPixelSize(int(size * 0.38));
     monogram.setWeight(QFont::Weight(680));
-    monogram.setLetterSpacing(QFont::AbsoluteSpacing, -1.5);
+    monogram.setLetterSpacing(QFont::AbsoluteSpacing, size * -0.04);
     p.setFont(monogram);
     p.setPen(c.lightBlue);
-    p.drawText(QRectF(0, 12, 100, 56), Qt::AlignCenter, QStringLiteral("JR"));
-
-    // Circuit traces leading to the nodes.
-    p.setBrush(Qt::NoBrush);
-    p.setPen(QPen(c.accent, 2.9, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    QPainterPath left;
-    left.moveTo(19, 78);
-    left.lineTo(38, 78);
-    left.lineTo(38, 70);
-    p.drawPath(left);
-    p.drawLine(QPointF(50, 78), QPointF(50, 73));
-    QPainterPath right;
-    right.moveTo(81, 78);
-    right.lineTo(62, 78);
-    right.lineTo(62, 70);
-    p.drawPath(right);
-
-    // Amber nodes — the single warm accent in the whole mark.
-    p.setPen(Qt::NoPen);
-    p.setBrush(c.amber);
-    p.drawEllipse(QPointF(38, 66.6), 3.7, 3.7);
-    p.drawEllipse(QPointF(62, 66.6), 3.7, 3.7);
-    p.setBrush(c.accent);
-    p.drawEllipse(QPointF(50, 69.8), 3.7, 3.7);
-
+    p.drawText(QRectF(0, 0, size, size), Qt::AlignCenter, QStringLiteral("JR"));
     return pm;
 }
 
@@ -844,6 +837,28 @@ QIcon Theme::icon(const QString &name, const QColor &colour)
         out.addPixmap(disabled, QIcon::Disabled);
     }
     return out;
+}
+
+QString Theme::logoSource()
+{
+    // An explicit override wins, so a different logo can be dropped in without
+    // rebuilding. Otherwise use the artwork compiled into the binary.
+    static const QString resolved = [] {
+        const QByteArray override = qgetenv("NIXOS_MANAGER_LOGO");
+        if (!override.isEmpty()) {
+            const QString path = QString::fromLocal8Bit(override);
+            if (QFileInfo::exists(path))
+                return path;
+            qWarning("NIXOS_MANAGER_LOGO points at %s, which does not exist",
+                qPrintable(path));
+        }
+#ifdef NIXOS_MANAGER_LOGO_RESOURCE
+        return QStringLiteral(NIXOS_MANAGER_LOGO_RESOURCE);
+#else
+        return QString();
+#endif
+    }();
+    return resolved;
 }
 
 QString Theme::chevronPath(Qt::ArrowType direction, const QColor &colour)

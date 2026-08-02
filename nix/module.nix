@@ -46,6 +46,17 @@ in
       '';
     };
 
+    logo = lib.mkOption {
+      type = lib.types.nullOr (lib.types.either lib.types.path lib.types.str);
+      default = null;
+      example = lib.literalExpression "./assets/jr-it.png";
+      description = ''
+        Image used as the application mark, exported as `NIXOS_MANAGER_LOGO`.
+        Either a PNG or an SVG. Leave null to use the artwork shipped with the
+        package.
+      '';
+    };
+
     installBrandFont = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -68,8 +79,8 @@ in
       (pkgs.google-fonts.override { fonts = [ "Manrope" ]; })
     ];
 
-    environment.sessionVariables = lib.mkIf (cfg.configPath != null) {
-      NIXOS_MANAGER_CONFIG = cfg.configPath;
-    };
+    environment.sessionVariables =
+      (lib.optionalAttrs (cfg.configPath != null) { NIXOS_MANAGER_CONFIG = cfg.configPath; })
+      // (lib.optionalAttrs (cfg.logo != null) { NIXOS_MANAGER_LOGO = toString cfg.logo; });
   };
 }
