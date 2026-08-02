@@ -13,6 +13,7 @@ namespace nixm {
 
 class BrandHeader;
 class EditorPage;
+class GitPage;
 class HostsPage;
 class LogPane;
 class ModulesPage;
@@ -60,6 +61,7 @@ private:
     ModulesPage *m_modules = nullptr;
     PackagesPage *m_packages = nullptr;
     OptionsPage *m_options = nullptr;
+    GitPage *m_git = nullptr;
     EditorPage *m_editor = nullptr;
     SystemPage *m_system = nullptr;
 

@@ -20,6 +20,8 @@ public:
         const QString &channel);
     void clearProject();
     void setDirtyCount(int count);
+    /// Branch plus the number of uncommitted changes; empty branch hides it.
+    void setGitState(const QString &branch, int changes);
     void setSaveEnabled(bool enabled);
     void applyTheme();
 
@@ -38,6 +40,7 @@ private:
     QLabel *m_project = nullptr;
     QLabel *m_meta = nullptr;
     QLabel *m_dirty = nullptr;
+    QLabel *m_git = nullptr;
     QToolButton *m_open = nullptr;
     QToolButton *m_save = nullptr;
     QToolButton *m_reload = nullptr;

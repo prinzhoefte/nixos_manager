@@ -34,6 +34,8 @@ add_library(nixos-manager-core STATIC
     src/core/CommandRunner.h
     src/core/SystemOps.cpp
     src/core/SystemOps.h
+    src/core/GitRepo.cpp
+    src/core/GitRepo.h
 )
 set_target_properties(nixos-manager-core PROPERTIES AUTOMOC ON POSITION_INDEPENDENT_CODE ON)
 target_include_directories(nixos-manager-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -66,6 +68,8 @@ if(NIXOS_MANAGER_BUILD_GUI)
         src/ui/PackagesPage.h
         src/ui/OptionsPage.cpp
         src/ui/OptionsPage.h
+        src/ui/GitPage.cpp
+        src/ui/GitPage.h
         src/ui/EditorPage.cpp
         src/ui/EditorPage.h
         src/ui/SystemPage.cpp

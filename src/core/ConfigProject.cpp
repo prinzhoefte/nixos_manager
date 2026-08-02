@@ -261,6 +261,13 @@ bool ConfigProject::isGlobalModule(const QString &absPath) const
 
 void ConfigProject::scanModules()
 {
+    // A host's own entry file is not a module you can import into that host —
+    // offering it would let you add `./configuration.nix` to its own imports,
+    // which is an infinite recursion at evaluation time.
+    QStringList entryFiles;
+    for (const HostInfo &h : std::as_const(m_hosts))
+        entryFiles << h.entryFile;
+
     QDirIterator it(m_root, QStringList() << QStringLiteral("*.nix"), QDir::Files,
         QDirIterator::Subdirectories);
     QDir rootDir(m_root);
@@ -275,7 +282,7 @@ void ConfigProject::scanModules()
                 break;
             }
         }
-        if (skipped || !isModuleCandidate(rel))
+        if (skipped || !isModuleCandidate(rel) || entryFiles.contains(abs))
             continue;
 
         ModuleInfo m;

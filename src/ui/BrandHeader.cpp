@@ -63,6 +63,12 @@ BrandHeader::BrandHeader(QWidget *parent)
     m_dirty->setVisible(false);
     layout->addWidget(m_dirty);
 
+    m_git = new QLabel(this);
+    m_git->setTextFormat(Qt::RichText);
+    m_git->setVisible(false);
+    m_git->setToolTip(tr("Current git branch and the number of uncommitted changes"));
+    layout->addWidget(m_git);
+
     layout->addStretch(1);
 
     // ── Global actions ───────────────────────────────────────────────────────
@@ -153,6 +159,26 @@ void BrandHeader::setDirtyCount(int count)
         QStringLiteral("<span style='color:%1;font-weight:700;font-size:8.5pt;'>&#9679; %2</span>")
             .arg(c.amber.name(), tr("%n unsaved file(s)", nullptr, count)));
     m_dirty->setVisible(true);
+}
+
+void BrandHeader::setGitState(const QString &branch, int changes)
+{
+    if (branch.isEmpty()) {
+        m_git->setVisible(false);
+        return;
+    }
+    const ThemeColors &c = Theme::colors();
+    // A dirty tree gets the same amber signal as unsaved buffers.
+    const QString colour = changes > 0 ? c.amber.name() : c.textMuted.name();
+    QString text = QStringLiteral("<span style='color:%1;font-size:8.5pt;font-weight:700;'>"
+                                  "&#9095; %2</span>")
+                       .arg(colour, branch.toHtmlEscaped());
+    if (changes > 0)
+        text += QStringLiteral("<span style='color:%1;font-size:8.5pt;'> · %2</span>")
+                    .arg(colour)
+                    .arg(tr("%n change(s)", nullptr, changes));
+    m_git->setText(text);
+    m_git->setVisible(true);
 }
 
 void BrandHeader::setSaveEnabled(bool enabled)

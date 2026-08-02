@@ -79,6 +79,20 @@ a bare string.
 other pages edit. Anything the app does not model can still be changed by hand,
 and the structured views pick the change up immediately.
 
+**Git** — version control for the configuration itself. Shows the branch, its
+upstream and how far ahead or behind you are; lists what changed with a coloured
+diff; stages, unstages, discards and commits; and fetches, pulls or pushes. The
+history table shows recent commits.
+
+If the tree is not a repository yet, the tab offers to create one — on branch
+`main`, with a `.gitignore` covering `result`, `result-*` and the usual editor
+leftovers — and commits nothing until you ask. Unsaved editor buffers are
+flushed before staging or committing, so a commit never silently omits an edit
+you just made.
+
+Every git command runs through the same log pane as everything else, so you can
+always see exactly what was executed.
+
 **System** — `nixos-rebuild switch/boot/test/dry-activate/dry-build/build` with
 live streaming output and a cancel button; the system generation list with
 rollback and deletion; flake inputs with their locked revisions and per-input
@@ -162,6 +176,43 @@ Module options:
 | `programs.nixos-manager.installPolkitAgent` | `true` | Enables `security.polkit`, which `pkexec` needs. |
 | `programs.nixos-manager.installBrandFont` | `true` | Adds Manrope to `fonts.packages` (only that family, not all of google-fonts). |
 
+### Without flakes, on a plain configuration.nix
+
+You do not need flakes. `nix/package.nix` is an ordinary `callPackage`
+derivation, so this drops straight into `/etc/nixos/configuration.nix`:
+
+```nix
+{ config, pkgs, ... }:
+
+let
+  nixos-manager-src = builtins.fetchTarball {
+    url = "https://github.com/prinzhoefte/nixos_manager/archive/main.tar.gz";
+    # nix-prefetch-url --unpack <that url>  →  paste the hash here
+    sha256 = "0000000000000000000000000000000000000000000000000000000000000000";
+  };
+  nixos-manager = pkgs.callPackage "${nixos-manager-src}/nix/package.nix" { };
+in
+{
+  environment.systemPackages = [ nixos-manager ];
+
+  # pkexec needs polkit, or the rebuild and cleanup actions cannot escalate
+  security.polkit.enable = true;
+
+  # optional: the brand typeface, Manrope only rather than all of google-fonts
+  fonts.packages = [ (pkgs.google-fonts.override { fonts = [ "Manrope" ]; }) ];
+
+  # optional: the tree the app opens by default
+  environment.sessionVariables.NIXOS_MANAGER_CONFIG = "/etc/nixos";
+}
+```
+
+Omitting `sha256` works but makes the fetch non-reproducible and re-downloads
+hourly.
+
+The NixOS module can be used without flakes too, but it takes the flake's `self`
+as its first argument, so you would have to hand it a stub. The four lines above
+do the same job more plainly.
+
 ### As an overlay
 
 ```nix
@@ -229,6 +280,7 @@ The interesting part is `src/core`, which has no UI dependency:
 | `PackageSearch.{h,cpp}` | Queries the search.nixos.org Elasticsearch index — packages and NixOS options — with an on-disk cache. Probes the index schema generation and remembers what answered, so an upstream bump does not break the app. |
 | `CommandRunner.{h,cpp}` | Sequences external commands, merges their output, handles privilege escalation and cancellation. |
 | `SystemOps.{h,cpp}` | Builds the argument lists for rebuilds, generations, flake updates and cleanup. Runs nothing itself. |
+| `GitRepo.{h,cpp}` | Parses `git status --porcelain=v2`, diffs and log; builds the steps for staging, committing, syncing and initialising. Read-only queries are synchronous, everything that writes goes through CommandRunner. |
 
 And on the UI side, `src/ui/Theme.{h,cpp}` holds the whole visual system: the
 two palettes, the generated stylesheet, a `QProxyStyle` that paints check marks
@@ -259,6 +311,12 @@ live in `~/.config/nixos-manager/nixos-manager.conf`.
   machine the app runs on.
 - A new host's `hardware-configuration.nix` is a placeholder. Only
   `nixos-generate-config` on the target machine can produce the real one.
+- Git operations run as your user. On a root-owned tree git will refuse with
+  "dubious ownership"; the Git tab detects that and offers to mark the
+  directory trusted, but committing still needs write access.
+- There is no merge-conflict resolution. `Pull` is `--ff-only` on purpose, so it
+  refuses rather than leaving you in a conflicted state the app cannot help
+  with.
 
 ## Licence
 

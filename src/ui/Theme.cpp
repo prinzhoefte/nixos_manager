@@ -287,6 +287,35 @@ void paintIcon(QPainter *p, const QString &name, const QColor &colour, int size)
         p->setBrush(colour);
         p->drawEllipse(QPointF(9, 7.5), 2.6, 2.6);
         p->drawEllipse(QPointF(15.5, 16.5), 2.6, 2.6);
+    } else if (name == QLatin1String("branch")) {
+        p->setBrush(colour);
+        p->drawEllipse(QPointF(7, 5.5), 2.6, 2.6);
+        p->drawEllipse(QPointF(7, 18.5), 2.6, 2.6);
+        p->drawEllipse(QPointF(17.5, 8.5), 2.6, 2.6);
+        p->setBrush(Qt::NoBrush);
+        p->drawLine(QPointF(7, 8.1), QPointF(7, 15.9));
+        QPainterPath merge;
+        merge.moveTo(17.5, 11.1);
+        merge.cubicTo(17.5, 15.5, 11, 13.5, 7.6, 17.2);
+        p->drawPath(merge);
+    } else if (name == QLatin1String("commit")) {
+        p->drawLine(QPointF(3, 12), QPointF(8.4, 12));
+        p->drawLine(QPointF(15.6, 12), QPointF(21, 12));
+        p->drawEllipse(QPointF(12, 12), 3.6, 3.6);
+    } else if (name == QLatin1String("push")) {
+        p->drawLine(QPointF(12, 20), QPointF(12, 6));
+        QPainterPath head;
+        head.moveTo(6.5, 11.5);
+        head.lineTo(12, 6);
+        head.lineTo(17.5, 11.5);
+        p->drawPath(head);
+    } else if (name == QLatin1String("pull")) {
+        p->drawLine(QPointF(12, 4), QPointF(12, 18));
+        QPainterPath head;
+        head.moveTo(6.5, 12.5);
+        head.lineTo(12, 18);
+        head.lineTo(17.5, 12.5);
+        p->drawPath(head);
     } else if (name == QLatin1String("options")) {
         // A key: options are the knobs that unlock behaviour.
         p->drawEllipse(QPointF(8, 9), 4.6, 4.6);

@@ -450,6 +450,8 @@ static void testFlakeHosts()
         CHECK(project.hosts().at(0).entryFile.endsWith(QStringLiteral("hosts/main-pc/default.nix")));
     }
     CHECK_EQ(project.modules().size(), qsizetype(2));
+    for (const ModuleInfo &m : project.modules())
+        CHECK(!m.relPath.startsWith(QStringLiteral("hosts/")));
     CHECK_EQ(project.nixpkgsChannel(), QStringLiteral("nixos-unstable"));
     CHECK_EQ(project.flakeInputs().size(), qsizetype(2));
 }
@@ -478,6 +480,21 @@ static void testSingleFileProject()
     CHECK_EQ(project.hosts().size(), qsizetype(1));
     if (!project.hosts().isEmpty())
         CHECK_EQ(project.hosts().at(0).name, QStringLiteral("nixos"));
+
+    // The entry file must not be offered as a module of itself: importing
+    // ./configuration.nix into configuration.nix is infinite recursion.
+    for (const ModuleInfo &m : project.modules())
+        CHECK(!m.absPath.endsWith(QStringLiteral("configuration.nix")));
+
+    // A real module alongside it still shows up.
+    QFile extra(root + QStringLiteral("/desktop.nix"));
+    CHECK(extra.open(QIODevice::WriteOnly | QIODevice::Text));
+    QTextStream(&extra) << QStringLiteral("{ ... }:\n{\n}\n");
+    extra.close();
+    project.rescan();
+    CHECK_EQ(project.modules().size(), qsizetype(1));
+    if (!project.modules().isEmpty())
+        CHECK_EQ(project.modules().at(0).name, QStringLiteral("desktop"));
 }
 
 int main(int argc, char **argv)

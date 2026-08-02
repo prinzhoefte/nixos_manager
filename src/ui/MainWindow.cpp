@@ -2,6 +2,7 @@
 
 #include "BrandHeader.h"
 #include "EditorPage.h"
+#include "GitPage.h"
 #include "HostsPage.h"
 #include "LogPane.h"
 #include "ModulesPage.h"
@@ -11,6 +12,7 @@
 #include "Theme.h"
 #include "core/CommandRunner.h"
 #include "core/ConfigProject.h"
+#include "core/GitRepo.h"
 #include "core/PackageSearch.h"
 #include "core/SystemOps.h"
 
@@ -86,6 +88,7 @@ void MainWindow::buildUi()
     m_packages = new PackagesPage(m_ctx, this);
     m_options = new OptionsPage(m_ctx, this);
     m_editor = new EditorPage(m_ctx, this);
+    m_git = new GitPage(m_ctx, this);
     m_system = new SystemPage(m_ctx, this);
 
     m_tabs->addTab(m_hosts, Theme::icon(QStringLiteral("host")), tr("&Hosts"));
@@ -93,6 +96,7 @@ void MainWindow::buildUi()
     m_tabs->addTab(m_packages, Theme::icon(QStringLiteral("package")), tr("&Packages"));
     m_tabs->addTab(m_options, Theme::icon(QStringLiteral("options")), tr("&Options"));
     m_tabs->addTab(m_editor, Theme::icon(QStringLiteral("editor")), tr("&Editor"));
+    m_tabs->addTab(m_git, Theme::icon(QStringLiteral("branch")), tr("&Git"));
     m_tabs->addTab(m_system, Theme::icon(QStringLiteral("system")), tr("&System"));
     m_tabs->setIconSize(QSize(16, 16));
 
@@ -138,6 +142,7 @@ void MainWindow::buildUi()
     connect(m_modules, &ModulesPage::openFileRequested, this, openInEditor);
     connect(m_packages, &PackagesPage::openFileRequested, this, openInEditor);
     connect(m_options, &OptionsPage::openFileRequested, this, openInEditor);
+    connect(m_git, &GitPage::openFileRequested, this, openInEditor);
 
     auto onModified = [this] {
         updateDirtyState();
@@ -163,6 +168,7 @@ void MainWindow::buildUi()
     connect(m_modules, &ModulesPage::statusMessage, this, showStatus);
     connect(m_packages, &PackagesPage::statusMessage, this, showStatus);
     connect(m_options, &OptionsPage::statusMessage, this, showStatus);
+    connect(m_git, &GitPage::statusMessage, this, showStatus);
     connect(m_editor, &EditorPage::statusMessage, this, showStatus);
     connect(m_system, &SystemPage::statusMessage, this, showStatus);
 
@@ -172,6 +178,11 @@ void MainWindow::buildUi()
         m_logDock->show();
     });
     connect(m_system, &SystemPage::saveRequested, this, [this] { saveAll(); });
+    connect(m_git, &GitPage::saveRequested, this, [this] { saveAll(); });
+    connect(m_git, &GitPage::repositoryStateChanged, this, [this](const GitStatus &status) {
+        m_header->setGitState(status.isRepository ? status.branch : QString(),
+            int(status.changes.size()));
+    });
 
     connect(m_ctx.runner, &CommandRunner::runningChanged, this, [this](bool running) {
         if (running)
@@ -252,7 +263,8 @@ void MainWindow::restyle()
     m_tabs->setTabIcon(2, Theme::icon(QStringLiteral("package")));
     m_tabs->setTabIcon(3, Theme::icon(QStringLiteral("options")));
     m_tabs->setTabIcon(4, Theme::icon(QStringLiteral("editor")));
-    m_tabs->setTabIcon(5, Theme::icon(QStringLiteral("system")));
+    m_tabs->setTabIcon(5, Theme::icon(QStringLiteral("branch")));
+    m_tabs->setTabIcon(6, Theme::icon(QStringLiteral("system")));
     QApplication::setWindowIcon(Theme::logo());
 
     m_hosts->applyTheme();
@@ -260,6 +272,7 @@ void MainWindow::restyle()
     m_packages->applyTheme();
     m_options->applyTheme();
     m_editor->applyTheme();
+    m_git->applyTheme();
     m_system->applyTheme();
     m_log->applyTheme();
 
@@ -362,6 +375,7 @@ void MainWindow::refreshAll()
     m_packages->refresh();
     m_options->refresh();
     m_editor->refresh();
+    m_git->refresh();
     m_system->refresh();
     updateWindowTitle();
     updateDirtyState();
@@ -428,6 +442,7 @@ bool MainWindow::saveAll()
     }
 
     updateDirtyState();
+    m_git->refresh();
     statusBar()->showMessage(tr("Saved."), 5000);
     return true;
 }
