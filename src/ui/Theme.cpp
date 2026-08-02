@@ -785,7 +785,7 @@ QPixmap Theme::logoPixmap(int size, qreal devicePixelRatio)
     // "JR" monogram. Manrope when it is installed, otherwise the fallback sans.
     QFont monogram(uiFontFamily());
     monogram.setPixelSize(38);
-    monogram.setWeight(QFont::Bold);
+    monogram.setWeight(QFont::Weight(680));
     monogram.setLetterSpacing(QFont::AbsoluteSpacing, -1.5);
     p.setFont(monogram);
     p.setPen(c.lightBlue);
