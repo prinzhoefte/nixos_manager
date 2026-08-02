@@ -91,6 +91,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     restoreGeometry(settings.value(QStringLiteral("window/geometry")).toByteArray());
     restoreState(settings.value(QStringLiteral("window/state")).toByteArray());
+    dockLogPane();
 
     updateWindowTitle();
 }
@@ -242,6 +243,18 @@ void MainWindow::buildActions()
     themeAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+T")));
     connect(themeAction, &QAction::triggered, this, &MainWindow::toggleTheme);
 
+    viewMenu->addSeparator();
+    auto *dockAction = viewMenu->addAction(tr("&Dock command output"));
+    dockAction->setToolTip(
+        tr("Reattach the command output pane, which dragging cannot always do on Wayland."));
+    connect(dockAction, &QAction::triggered, this, [this] {
+        dockLogPane();
+        m_logDock->show();
+    });
+
+    auto *resetAction = viewMenu->addAction(tr("&Reset window layout"));
+    connect(resetAction, &QAction::triggered, this, &MainWindow::resetLayout);
+
     auto *toolsMenu = menuBar()->addMenu(tr("&Tools"));
     auto *settingsAction = toolsMenu->addAction(tr("&Settings…"));
     connect(settingsAction, &QAction::triggered, this, &MainWindow::showSettings);
@@ -261,6 +274,29 @@ void MainWindow::buildActions()
     m_reloadAction->setIcon(Theme::icon(QStringLiteral("reload")));
 
     rebuildRecentMenu();
+}
+
+void MainWindow::dockLogPane()
+{
+    // Always start attached. A floating QDockWidget is dragged back by moving
+    // its window over the main one, which Wayland does not let Qt do reliably,
+    // so a pane left floating at exit would otherwise be stuck that way for
+    // good.
+    if (m_logDock->isFloating())
+        m_logDock->setFloating(false);
+    if (dockWidgetArea(m_logDock) == Qt::NoDockWidgetArea)
+        addDockWidget(Qt::BottomDockWidgetArea, m_logDock);
+}
+
+void MainWindow::resetLayout()
+{
+    m_logDock->setFloating(false);
+    addDockWidget(Qt::BottomDockWidgetArea, m_logDock);
+    m_logDock->show();
+    resizeDocks({ m_logDock }, { 220 }, Qt::Vertical);
+    QSettings settings;
+    settings.remove(QStringLiteral("window/state"));
+    statusBar()->showMessage(tr("Window layout reset."), 5000);
 }
 
 void MainWindow::toggleTheme()

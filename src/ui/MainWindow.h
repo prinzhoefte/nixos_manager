@@ -52,6 +52,9 @@ private:
     void rebuildRecentMenu();
     void toggleTheme();
     void restyle();
+    /// Reattaches the log pane, whatever state it was saved in.
+    void dockLogPane();
+    void resetLayout();
 
     AppContext m_ctx;
 

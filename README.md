@@ -100,6 +100,12 @@ updates; and a cleanup panel that does what `nix-env --delete-generations old &&
 nix-collect-garbage -d` does, with a dry-run mode and an optional store
 optimise pass.
 
+The output pane always starts docked at the bottom, whatever state it was left
+in. Dragging a floating dock back onto the window is something Wayland does not
+let Qt do reliably, so *View ▸ Dock command output* reattaches it without a
+drag, and *View ▸ Reset window layout* puts everything back if the layout ever
+gets into a state you cannot click your way out of.
+
 Every privileged command is shown in full before it runs. Escalation uses
 **sudo** by default: the app asks for your password once per batch, hands it
 straight to `sudo -v` and forgets it, then runs each command with `sudo -n`
