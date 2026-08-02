@@ -62,6 +62,17 @@ struct AttrEntry {
     QString unquoted() const;
 };
 
+/// An attribute set binding, e.g. `nixosConfigurations = { … };`. Recorded so
+/// new members can be inserted inside an existing set rather than appended to
+/// the end of the file.
+struct NixAttrSet {
+    QString path;
+    int lbrace = 0;      // char position of '{'
+    int rbrace = 0;      // char position of '}'
+    int stmtStart = 0;
+    int stmtEnd = 0;
+};
+
 /// An option declared by a module via `lib.mkOption`.
 struct OptionDecl {
     QString path;               // "nixos.pkgs.wallpaper-engine-kde-plugin.enable"
@@ -99,6 +110,7 @@ public:
     const QVector<ImportEntry> &imports() const { return m_imports; }
     const QVector<NixList> &lists() const { return m_lists; }
     const QVector<AttrEntry> &attrs() const { return m_attrs; }
+    const QVector<NixAttrSet> &attrSets() const { return m_sets; }
     const QVector<OptionDecl> &optionDecls() const { return m_options; }
 
     bool hasImportsList() const { return m_importsList >= 0; }
@@ -107,6 +119,7 @@ public:
 
     const AttrEntry *findAttr(const QString &path) const;
     const NixList *findList(const QString &path) const;
+    const NixAttrSet *findSet(const QString &path) const;
     QVector<const NixList *> packageLists() const;
 
     // ── Mutations ────────────────────────────────────────────────────────────
@@ -121,6 +134,11 @@ public:
     /// Updates an existing binding, or appends one to the top-level attrset.
     bool setAttribute(const QString &path, const QString &rawValue);
     bool removeAttribute(const QString &path);
+
+    /// Inserts `name = rawValue;` inside the attribute set at `setPath`,
+    /// matching the `=` alignment its siblings already use. Returns false when
+    /// there is no such set.
+    bool addToAttrSet(const QString &setPath, const QString &name, const QString &rawValue);
 
     static QString quoteNixString(const QString &s);
 
@@ -141,6 +159,7 @@ private:
     QVector<ImportEntry> m_imports;
     QVector<NixList> m_lists;
     QVector<AttrEntry> m_attrs;
+    QVector<NixAttrSet> m_sets;
     QVector<OptionDecl> m_options;
     QStringList m_importSections;
     QMap<QString, int> m_importSectionEnd;   // section name -> end of its header comment

@@ -5,6 +5,11 @@
 #include "core/NixFile.h"
 
 #include <QCheckBox>
+#include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -16,6 +21,8 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSplitter>
+#include <QMessageBox>
+#include <QTextStream>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -80,6 +87,12 @@ void HostsPage::buildUi()
     m_summary->setWordWrap(true);
     m_summary->setTextFormat(Qt::RichText);
     leftLayout->addWidget(m_summary);
+
+    m_newHost = new QPushButton(tr("New host…"), left);
+    m_newHost->setIcon(Theme::icon(QStringLiteral("add"), Theme::colors().textOnBrand));
+    Theme::makePrimary(m_newHost);
+    connect(m_newHost, &QPushButton::clicked, this, &HostsPage::createHost);
+    leftLayout->addWidget(m_newHost);
 
     splitter->addWidget(left);
 
@@ -641,8 +654,241 @@ void HostsPage::commitIdentity()
     }
 }
 
+void HostsPage::createHost()
+{
+    ConfigProject *project = m_ctx.project;
+    if (!project || !project->isOpen())
+        return;
+
+    const bool isFlake = project->kind() == ConfigProject::Flake;
+    if (!isFlake) {
+        QMessageBox::information(this, tr("New host"),
+            tr("Adding hosts only makes sense for a flake with several "
+               "nixosConfigurations. This configuration is a single "
+               "configuration.nix."));
+        return;
+    }
+
+    // ── Dialog ───────────────────────────────────────────────────────────────
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("New host"));
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *form = new QFormLayout;
+
+    auto *name = new QLineEdit(&dialog);
+    name->setPlaceholderText(QStringLiteral("laptop"));
+    form->addRow(tr("Directory / attribute name:"), name);
+
+    auto *hostName = new QLineEdit(&dialog);
+    hostName->setPlaceholderText(tr("defaults to the name above"));
+    form->addRow(tr("networking.hostName:"), hostName);
+
+    auto *stateVersion = new QLineEdit(&dialog);
+    // Copy the state version the rest of the fleet uses.
+    for (const HostInfo &h : project->hosts()) {
+        if (NixFile *f = project->file(h.entryFile)) {
+            if (const AttrEntry *sv = f->findAttr(QStringLiteral("system.stateVersion"))) {
+                stateVersion->setText(sv->unquoted());
+                break;
+            }
+        }
+    }
+    form->addRow(tr("system.stateVersion:"), stateVersion);
+
+    auto *copyFrom = new QComboBox(&dialog);
+    copyFrom->addItem(tr("Nothing — start empty"), QString());
+    for (const HostInfo &h : project->hosts())
+        copyFrom->addItem(tr("Copy imports from %1").arg(h.name), h.name);
+    form->addRow(tr("Modules:"), copyFrom);
+    layout->addLayout(form);
+
+    auto *registerInFlake = new QCheckBox(tr("Register in flake.nix"), &dialog);
+    registerInFlake->setChecked(true);
+    layout->addWidget(registerInFlake);
+
+    auto *hardwareStub = new QCheckBox(tr("Write a hardware-configuration.nix placeholder"),
+        &dialog);
+    hardwareStub->setChecked(true);
+    hardwareStub->setToolTip(
+        tr("The real file has to come from nixos-generate-config on the target machine. The "
+           "placeholder keeps the tree evaluable until you replace it."));
+    layout->addWidget(hardwareStub);
+
+    auto *buttons
+        = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    // ── Validate ─────────────────────────────────────────────────────────────
+    const QString hostDirName = name->text().trimmed();
+    if (hostDirName.isEmpty()) {
+        QMessageBox::warning(this, tr("New host"), tr("Please give the host a name."));
+        return;
+    }
+    if (project->host(hostDirName)) {
+        QMessageBox::warning(this, tr("New host"),
+            tr("A host called %1 already exists.").arg(hostDirName));
+        return;
+    }
+
+    QDir root(project->root());
+    const QString relDir = QStringLiteral("hosts/") + hostDirName;
+    if (QFileInfo::exists(root.absoluteFilePath(relDir))) {
+        QMessageBox::warning(this, tr("New host"), tr("%1 already exists.").arg(relDir));
+        return;
+    }
+    if (!root.mkpath(relDir)) {
+        QMessageBox::warning(this, tr("New host"),
+            tr("Could not create %1. Is the configuration tree writable?").arg(relDir));
+        return;
+    }
+
+    const QString hostDir = root.absoluteFilePath(relDir);
+    const QString entryFile = QDir(hostDir).absoluteFilePath(QStringLiteral("default.nix"));
+
+    // ── default.nix ──────────────────────────────────────────────────────────
+    QString imports = QStringLiteral("        ./hardware-configuration.nix\n");
+    const QString copySource = copyFrom->currentData().toString();
+    if (!copySource.isEmpty()) {
+        if (const HostInfo *source = project->host(copySource)) {
+            if (NixFile *sourceFile = project->file(source->entryFile)) {
+                QString section;
+                for (const ImportEntry &e : sourceFile->imports()) {
+                    // The source host's own hardware file is not shared.
+                    if (e.text.endsWith(QLatin1String("hardware-configuration.nix")))
+                        continue;
+                    if (e.section != section) {
+                        section = e.section;
+                        if (!section.isEmpty()) {
+                            QString header = QStringLiteral("        # ── %1 ").arg(section);
+                            while (header.size() < 83)
+                                header += QChar(0x2500);
+                            imports += QLatin1Char('\n') + header + QLatin1Char('\n');
+                        }
+                    }
+                    imports += QStringLiteral("        %1%2\n")
+                                   .arg(e.enabled ? QString() : QStringLiteral("#"), e.text);
+                }
+            }
+        }
+    }
+
+    const QString effectiveHostName
+        = hostName->text().trimmed().isEmpty() ? hostDirName : hostName->text().trimmed();
+    const QString version
+        = stateVersion->text().trimmed().isEmpty() ? QStringLiteral("24.05")
+                                                   : stateVersion->text().trimmed();
+
+    // A copied import like `inputs.foo.nixosModules.default` only resolves if
+    // the module actually takes `inputs`.
+    const QString formals = imports.contains(QLatin1String("inputs."))
+        ? QStringLiteral("{ pkgs, inputs, ... }:")
+        : QStringLiteral("{ pkgs, ... }:");
+
+    const QString body = QStringLiteral("%0\n"
+                                        "\n"
+                                        "{\n"
+                                        "    imports = [\n%1    ];\n"
+                                        "\n"
+                                        "    # ── Identity ──────────────────────"
+                                        "───────────────────────────────────────────\n"
+                                        "    networking.hostName = %2;\n"
+                                        "\n"
+                                        "    system.stateVersion = %3;\n"
+                                        "}\n")
+                             .arg(formals, imports, NixFile::quoteNixString(effectiveHostName),
+                                 NixFile::quoteNixString(version));
+
+    QFile out(entryFile);
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, tr("New host"),
+            tr("Could not write %1: %2").arg(entryFile, out.errorString()));
+        return;
+    }
+    QTextStream(&out) << body;
+    out.close();
+
+    // ── hardware-configuration.nix placeholder ───────────────────────────────
+    if (hardwareStub->isChecked()) {
+        QFile hardware(QDir(hostDir).absoluteFilePath(QStringLiteral("hardware-configuration.nix")));
+        if (hardware.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            QTextStream(&hardware)
+                << QStringLiteral(
+                       "# PLACEHOLDER — replace this with the real thing.\n"
+                       "#\n"
+                       "# On the target machine run:\n"
+                       "#     sudo nixos-generate-config --show-hardware-config \\\n"
+                       "#         > hosts/%1/hardware-configuration.nix\n"
+                       "#\n"
+                       "# Until then this host will not boot: it declares no file systems and\n"
+                       "# no boot device.\n"
+                       "{ ... }:\n"
+                       "\n"
+                       "{\n"
+                       "}\n")
+                       .arg(hostDirName);
+            hardware.close();
+        }
+    }
+
+    // ── flake.nix registration ───────────────────────────────────────────────
+    bool registered = false;
+    if (registerInFlake->isChecked()) {
+        if (NixFile *flake = project->file(project->flakeFile())) {
+            // Reuse whatever the neighbouring entries do: `mkHost ./hosts/x`,
+            // or a direct nixosSystem call if that is the house style.
+            QString value = QStringLiteral("mkHost ./hosts/%1").arg(hostDirName);
+            for (const AttrEntry &a : flake->attrs()) {
+                if (!a.path.endsWith(QStringLiteral("nixosConfigurations.") + a.path.section(
+                        QLatin1Char('.'), -1)))
+                    continue;
+                if (!a.path.contains(QLatin1String("nixosConfigurations.")))
+                    continue;
+                const QString existing = a.rawValue.simplified();
+                const int slash = existing.indexOf(QLatin1String("./hosts/"));
+                if (slash > 0) {
+                    value = existing.left(slash) + QStringLiteral("./hosts/") + hostDirName;
+                    break;
+                }
+            }
+
+            QString setPath;
+            for (const NixAttrSet &set : flake->attrSets()) {
+                if (set.path == QLatin1String("nixosConfigurations")
+                    || set.path.endsWith(QLatin1String(".nixosConfigurations"))) {
+                    setPath = set.path;
+                    break;
+                }
+            }
+            if (!setPath.isEmpty())
+                registered = flake->addToAttrSet(setPath, hostDirName, value);
+        }
+    }
+
+    project->rescan();
+    refresh();
+    selectHost(hostDirName);
+
+    if (registerInFlake->isChecked() && !registered) {
+        QMessageBox::warning(this, tr("New host"),
+            tr("%1 was created, but the nixosConfigurations set in flake.nix could not be "
+               "found, so the host is not registered yet. Add it by hand in the Editor tab.")
+                .arg(relDir));
+    }
+
+    emit statusMessage(tr("Created host %1").arg(hostDirName));
+    emit configModified();
+    emit openFileRequested(entryFile);
+}
+
 void HostsPage::applyTheme()
 {
+    m_newHost->setIcon(Theme::icon(QStringLiteral("add"), Theme::colors().textOnBrand));
+    Theme::makePrimary(m_newHost);
     m_rebuild->setIcon(Theme::icon(QStringLiteral("run"), Theme::colors().textOnBrand));
     Theme::makePrimary(m_rebuild);
     m_openHostFile->setIcon(Theme::icon(QStringLiteral("editor")));

@@ -5,6 +5,7 @@
 #include "HostsPage.h"
 #include "LogPane.h"
 #include "ModulesPage.h"
+#include "OptionsPage.h"
 #include "PackagesPage.h"
 #include "SystemPage.h"
 #include "Theme.h"
@@ -83,12 +84,14 @@ void MainWindow::buildUi()
     m_hosts = new HostsPage(m_ctx, this);
     m_modules = new ModulesPage(m_ctx, this);
     m_packages = new PackagesPage(m_ctx, this);
+    m_options = new OptionsPage(m_ctx, this);
     m_editor = new EditorPage(m_ctx, this);
     m_system = new SystemPage(m_ctx, this);
 
     m_tabs->addTab(m_hosts, Theme::icon(QStringLiteral("host")), tr("&Hosts"));
     m_tabs->addTab(m_modules, Theme::icon(QStringLiteral("module")), tr("&Modules"));
     m_tabs->addTab(m_packages, Theme::icon(QStringLiteral("package")), tr("&Packages"));
+    m_tabs->addTab(m_options, Theme::icon(QStringLiteral("options")), tr("&Options"));
     m_tabs->addTab(m_editor, Theme::icon(QStringLiteral("editor")), tr("&Editor"));
     m_tabs->addTab(m_system, Theme::icon(QStringLiteral("system")), tr("&System"));
     m_tabs->setIconSize(QSize(16, 16));
@@ -134,27 +137,32 @@ void MainWindow::buildUi()
     connect(m_hosts, &HostsPage::openFileRequested, this, openInEditor);
     connect(m_modules, &ModulesPage::openFileRequested, this, openInEditor);
     connect(m_packages, &PackagesPage::openFileRequested, this, openInEditor);
+    connect(m_options, &OptionsPage::openFileRequested, this, openInEditor);
 
     auto onModified = [this] {
         updateDirtyState();
         m_editor->syncFromBuffer();
         m_modules->refresh();
         m_packages->refresh();
+        m_options->refresh();
     };
     connect(m_hosts, &HostsPage::configModified, this, onModified);
     connect(m_modules, &ModulesPage::configModified, this, onModified);
     connect(m_packages, &PackagesPage::configModified, this, onModified);
+    connect(m_options, &OptionsPage::configModified, this, onModified);
     connect(m_editor, &EditorPage::configModified, this, [this] {
         updateDirtyState();
         m_hosts->refresh();
         m_modules->refresh();
         m_packages->refresh();
+        m_options->refresh();
     });
 
     auto showStatus = [this](const QString &text) { statusBar()->showMessage(text, 6000); };
     connect(m_hosts, &HostsPage::statusMessage, this, showStatus);
     connect(m_modules, &ModulesPage::statusMessage, this, showStatus);
     connect(m_packages, &PackagesPage::statusMessage, this, showStatus);
+    connect(m_options, &OptionsPage::statusMessage, this, showStatus);
     connect(m_editor, &EditorPage::statusMessage, this, showStatus);
     connect(m_system, &SystemPage::statusMessage, this, showStatus);
 
@@ -242,13 +250,15 @@ void MainWindow::restyle()
     m_tabs->setTabIcon(0, Theme::icon(QStringLiteral("host")));
     m_tabs->setTabIcon(1, Theme::icon(QStringLiteral("module")));
     m_tabs->setTabIcon(2, Theme::icon(QStringLiteral("package")));
-    m_tabs->setTabIcon(3, Theme::icon(QStringLiteral("editor")));
-    m_tabs->setTabIcon(4, Theme::icon(QStringLiteral("system")));
+    m_tabs->setTabIcon(3, Theme::icon(QStringLiteral("options")));
+    m_tabs->setTabIcon(4, Theme::icon(QStringLiteral("editor")));
+    m_tabs->setTabIcon(5, Theme::icon(QStringLiteral("system")));
     QApplication::setWindowIcon(Theme::logo());
 
     m_hosts->applyTheme();
     m_modules->applyTheme();
     m_packages->applyTheme();
+    m_options->applyTheme();
     m_editor->applyTheme();
     m_system->applyTheme();
     m_log->applyTheme();
@@ -350,6 +360,7 @@ void MainWindow::refreshAll()
     m_hosts->refresh();
     m_modules->refresh();
     m_packages->refresh();
+    m_options->refresh();
     m_editor->refresh();
     m_system->refresh();
     updateWindowTitle();

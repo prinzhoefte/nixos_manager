@@ -47,6 +47,7 @@ private:
     void onOptionItemChanged(QTreeWidgetItem *item, int column);
     void commitIdentity();
     void applyModuleFilter(const QString &text);
+    void createHost();
 
     /// Section header a module should be filed under, derived from its category.
     QString sectionForCategory(const QString &category) const;
@@ -65,6 +66,7 @@ private:
     QLabel *m_summary = nullptr;
     QPushButton *m_openHostFile = nullptr;
     QPushButton *m_rebuild = nullptr;
+    QPushButton *m_newHost = nullptr;
 };
 
 } // namespace nixm

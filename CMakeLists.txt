@@ -64,6 +64,8 @@ if(NIXOS_MANAGER_BUILD_GUI)
         src/ui/ModulesPage.h
         src/ui/PackagesPage.cpp
         src/ui/PackagesPage.h
+        src/ui/OptionsPage.cpp
+        src/ui/OptionsPage.h
         src/ui/EditorPage.cpp
         src/ui/EditorPage.h
         src/ui/SystemPage.cpp

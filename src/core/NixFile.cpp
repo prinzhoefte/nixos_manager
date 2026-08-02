@@ -187,6 +187,38 @@ private:
                 if (semi < 0)
                     return -1;
                 i = semi;
+                continue;
+            }
+
+            // A `let … in` prelude carries its own `;` per binding; none of them
+            // terminates the binding we are measuring.
+            if (skipWith && depth == 0 && x.isIdent("let")) {
+                int nested = 0;
+                int braceDepth = 0;
+                int j = i + 1;
+                for (; j < end && j < count(); ++j) {
+                    const Token &y = t[j];
+                    if (y.kind == TokKind::Punct) {
+                        const QString &q = y.text;
+                        if (q == QLatin1String("{") || q == QLatin1String("[")
+                            || q == QLatin1String("(")) {
+                            ++braceDepth;
+                        } else if (q == QLatin1String("}") || q == QLatin1String("]")
+                            || q == QLatin1String(")")) {
+                            if (braceDepth == 0)
+                                break;
+                            --braceDepth;
+                        }
+                    } else if (braceDepth == 0 && y.isIdent("let")) {
+                        ++nested;
+                    } else if (braceDepth == 0 && y.isIdent("in")) {
+                        if (nested == 0)
+                            break;
+                        --nested;
+                    }
+                }
+                i = j;
+                continue;
             }
         }
         return -1;
@@ -391,6 +423,14 @@ private:
         if (t[p].isPunct("{") && !isFormals(p)) {
             const int close = match(p);
             if (close >= 0 && close <= vLast) {
+                NixAttrSet set;
+                set.path = norm;
+                set.lbrace = t[p].start;
+                set.rbrace = t[close].start;
+                set.stmtStart = stmtStart;
+                set.stmtEnd = stmtEndChar;
+                F.m_sets.push_back(set);
+
                 parseBody(p + 1, close, full);
                 return;
             }
@@ -629,6 +669,7 @@ void NixFile::analyze()
     m_imports.clear();
     m_lists.clear();
     m_attrs.clear();
+    m_sets.clear();
     m_options.clear();
     m_importSections.clear();
     m_importSectionEnd.clear();
@@ -667,6 +708,14 @@ const NixList *NixFile::findList(const QString &path) const
     for (const NixList &l : m_lists)
         if (l.path == path)
             return &l;
+    return nullptr;
+}
+
+const NixAttrSet *NixFile::findSet(const QString &path) const
+{
+    for (const NixAttrSet &s : m_sets)
+        if (s.path == path)
+            return &s;
     return nullptr;
 }
 
@@ -898,6 +947,67 @@ bool NixFile::setAttribute(const QString &path, const QString &rawValue)
     const QString indent = indentAt(m_bodyClose) + QStringLiteral("    ");
     const int at = lineStart(m_bodyClose);
     m_text.insert(at, indent + path + QStringLiteral(" = ") + rawValue + QStringLiteral(";\n"));
+    m_dirty = true;
+    analyze();
+    return true;
+}
+
+bool NixFile::addToAttrSet(const QString &setPath, const QString &name, const QString &rawValue)
+{
+    const NixAttrSet *set = findSet(setPath);
+    if (!set)
+        return false;
+
+    const QString memberPath = setPath + QLatin1Char('.') + name;
+    if (findAttr(memberPath) || findSet(memberPath))
+        return setAttribute(memberPath, rawValue);
+
+    // Collect the direct members so we can match their layout.
+    QVector<const AttrEntry *> siblings;
+    for (const AttrEntry &a : m_attrs) {
+        if (!a.path.startsWith(setPath + QLatin1Char('.')))
+            continue;
+        if (a.path.mid(setPath.size() + 1).contains(QLatin1Char('.')))
+            continue;
+        if (a.stmtStart > set->lbrace && a.stmtEnd <= set->rbrace)
+            siblings.push_back(&a);
+    }
+
+    QString indent;
+    int insertAt;
+    int equalsColumn = -1;
+
+    if (siblings.isEmpty()) {
+        indent = indentAt(set->lbrace) + QStringLiteral("    ");
+        insertAt = set->lbrace + 1;
+    } else {
+        const AttrEntry *last = siblings.first();
+        for (const AttrEntry *a : std::as_const(siblings))
+            if (a->stmtEnd > last->stmtEnd)
+                last = a;
+        indent = indentAt(siblings.first()->stmtStart);
+        insertAt = lineEnd(last->stmtEnd);
+
+        // Their `=` signs are often aligned in a column; keep that up.
+        for (const AttrEntry *a : std::as_const(siblings)) {
+            const int eq = m_text.lastIndexOf(QLatin1Char('='), a->valueStart);
+            if (eq < 0)
+                continue;
+            const int column = eq - lineStart(eq);
+            equalsColumn = qMax(equalsColumn, column);
+        }
+    }
+
+    QString member = indent + name;
+    if (equalsColumn > 0) {
+        // The " = " we append supplies one of the spaces, hence the -1.
+        const int target = equalsColumn - int(indent.size()) - 1;
+        if (target > name.size())
+            member += QString(target - name.size(), QLatin1Char(' '));
+    }
+    member += QStringLiteral(" = ") + rawValue + QLatin1Char(';');
+
+    m_text.insert(insertAt, QLatin1Char('\n') + member);
     m_dirty = true;
     analyze();
     return true;

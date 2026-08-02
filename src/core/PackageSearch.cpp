@@ -10,6 +10,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QRegularExpression>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QUrl>
@@ -117,18 +118,19 @@ QString PackageSearch::cacheDir() const
     return QDir(base).absoluteFilePath(QStringLiteral("packages/") + m_channel);
 }
 
-QString PackageSearch::cachePathFor(const QString &query, int limit) const
+QString PackageSearch::cachePathFor(Kind kind, const QString &query, int limit) const
 {
-    const QString key = query.trimmed().toLower() + QLatin1Char('|') + QString::number(limit);
+    const QString key = (kind == Kind::Option ? QStringLiteral("opt|") : QStringLiteral("pkg|"))
+        + query.trimmed().toLower() + QLatin1Char('|') + QString::number(limit);
     const QByteArray hash
         = QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha1).toHex();
     return QDir(cacheDir()).absoluteFilePath(QString::fromLatin1(hash) + QStringLiteral(".json"));
 }
 
-bool PackageSearch::loadFromCache(const QString &query, int limit, QVector<PackageResult> *out,
+bool PackageSearch::loadFromCache(Kind kind, const QString &query, int limit, QByteArray *out,
     bool ignoreExpiry) const
 {
-    const QString path = cachePathFor(query, limit);
+    const QString path = cachePathFor(kind, query, limit);
     QFileInfo info(path);
     if (!info.exists())
         return false;
@@ -139,14 +141,15 @@ bool PackageSearch::loadFromCache(const QString &query, int limit, QVector<Packa
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly))
         return false;
-    *out = parseResponse(f.readAll());
+    *out = f.readAll();
     return true;
 }
 
-void PackageSearch::storeInCache(const QString &query, int limit, const QByteArray &payload) const
+void PackageSearch::storeInCache(Kind kind, const QString &query, int limit,
+    const QByteArray &payload) const
 {
     QDir().mkpath(cacheDir());
-    QFile f(cachePathFor(query, limit));
+    QFile f(cachePathFor(kind, query, limit));
     if (f.open(QIODevice::WriteOnly | QIODevice::Truncate))
         f.write(payload);
 }
@@ -170,6 +173,15 @@ void PackageSearch::cancel()
     emit busyChanged(false);
 }
 
+void PackageSearch::emitResults(Kind kind, const QString &query, const QByteArray &json,
+    bool fromCache)
+{
+    if (kind == Kind::Option)
+        emit optionResultsReady(query, parseOptionResponse(json), fromCache);
+    else
+        emit resultsReady(query, parseResponse(json), fromCache);
+}
+
 void PackageSearch::search(const QString &query, int limit)
 {
     const QString q = query.trimmed();
@@ -178,18 +190,79 @@ void PackageSearch::search(const QString &query, int limit)
         return;
     }
 
-    QVector<PackageResult> cached;
-    if (loadFromCache(q, limit, &cached, false)) {
-        emit resultsReady(q, cached, true);
+    QByteArray cached;
+    if (loadFromCache(Kind::Package, q, limit, &cached, false)) {
+        emit resultsReady(q, parseResponse(cached), true);
         return;
     }
 
     cancel();
-    sendRequest(q, limit, 0);
+    sendRequest(Kind::Package, q, limit, 0);
 }
 
-QByteArray PackageSearch::buildQueryBody(const QString &query, int limit) const
+void PackageSearch::searchOptions(const QString &query, int limit)
 {
+    const QString q = query.trimmed();
+    if (q.isEmpty()) {
+        emit optionResultsReady(q, {}, true);
+        return;
+    }
+
+    QByteArray cached;
+    if (loadFromCache(Kind::Option, q, limit, &cached, false)) {
+        emit optionResultsReady(q, parseOptionResponse(cached), true);
+        return;
+    }
+
+    cancel();
+    sendRequest(Kind::Option, q, limit, 0);
+}
+
+QByteArray PackageSearch::buildQueryBody(Kind kind, const QString &query, int limit) const
+{
+    if (kind == Kind::Option) {
+        // Option names are dotted paths, so a prefix/substring match on the name
+        // beats full-text scoring for the way people actually search here.
+        const QJsonArray optionFields {
+            QStringLiteral("option_name^9"),
+            QStringLiteral("option_name.*^5.4"),
+            QStringLiteral("option_description^1.3"),
+            QStringLiteral("option_description.*^0.78"),
+        };
+        QJsonObject multiMatch{
+            { QStringLiteral("type"), QStringLiteral("cross_fields") },
+            { QStringLiteral("query"), query },
+            { QStringLiteral("analyzer"), QStringLiteral("whitespace") },
+            { QStringLiteral("auto_generate_synonyms_phrase_query"), false },
+            { QStringLiteral("operator"), QStringLiteral("and") },
+            { QStringLiteral("fields"), optionFields },
+        };
+        QJsonObject wildcard{ { QStringLiteral("option_name"),
+            QJsonObject{ { QStringLiteral("value"), QStringLiteral("*%1*").arg(query.toLower()) },
+                { QStringLiteral("case_insensitive"), true } } } };
+        QJsonObject disMax{
+            { QStringLiteral("tie_breaker"), 0.7 },
+            { QStringLiteral("queries"),
+                QJsonArray{ QJsonObject{ { QStringLiteral("multi_match"), multiMatch } },
+                    QJsonObject{ { QStringLiteral("wildcard"), wildcard } } } },
+        };
+        QJsonObject boolQuery{
+            { QStringLiteral("filter"),
+                QJsonArray{ QJsonObject{ { QStringLiteral("term"),
+                    QJsonObject{ { QStringLiteral("type"),
+                        QJsonObject{ { QStringLiteral("value"),
+                            QStringLiteral("option") } } } } } } } },
+            { QStringLiteral("must"),
+                QJsonArray{ QJsonObject{ { QStringLiteral("dis_max"), disMax } } } },
+        };
+        QJsonObject body{
+            { QStringLiteral("from"), 0 },
+            { QStringLiteral("size"), limit },
+            { QStringLiteral("query"), QJsonObject{ { QStringLiteral("bool"), boolQuery } } },
+        };
+        return QJsonDocument(body).toJson(QJsonDocument::Compact);
+    }
+
     // Mirrors the query shape used by search.nixos.org: exact attribute matches
     // rank highest, then program names, then pname, then the descriptions.
     const QJsonArray fields = {
@@ -243,15 +316,15 @@ QByteArray PackageSearch::buildQueryBody(const QString &query, int limit) const
     return QJsonDocument(body).toJson(QJsonDocument::Compact);
 }
 
-void PackageSearch::sendRequest(const QString &query, int limit, int candidateIndex)
+void PackageSearch::sendRequest(Kind kind, const QString &query, int limit, int candidateIndex)
 {
     const QVector<int> candidates = candidateGenerations(m_generation);
 
     if (candidateIndex >= candidates.size()) {
         // Nothing answered. Fall back to a stale cache entry if we have one.
-        QVector<PackageResult> stale;
-        if (loadFromCache(query, limit, &stale, true)) {
-            emit resultsReady(query, stale, true);
+        QByteArray stale;
+        if (loadFromCache(kind, query, limit, &stale, true)) {
+            emitResults(kind, query, stale, true);
             emit failed(tr("Could not reach the package index; showing cached results."));
         } else {
             emit failed(tr("Could not reach the package index. Check your network connection, "
@@ -280,13 +353,15 @@ void PackageSearch::sendRequest(const QString &query, int limit, int candidateIn
         QNetworkRequest::NoLessSafeRedirectPolicy);
     req.setTransferTimeout(20000);
 
-    m_reply = m_net->post(req, buildQueryBody(query, limit));
+    m_reply = m_net->post(req, buildQueryBody(kind, query, limit));
     emit busyChanged(true);
     connect(m_reply, &QNetworkReply::finished, this,
-        [this, query, limit, candidateIndex] { handleReply(query, limit, candidateIndex); });
+        [this, kind, query, limit, candidateIndex] {
+            handleReply(kind, query, limit, candidateIndex);
+        });
 }
 
-void PackageSearch::handleReply(const QString &query, int limit, int candidateIndex)
+void PackageSearch::handleReply(Kind kind, const QString &query, int limit, int candidateIndex)
 {
     const QVector<int> candidates = candidateGenerations(m_generation);
     const int generation
@@ -304,12 +379,12 @@ void PackageSearch::handleReply(const QString &query, int limit, int candidateIn
     if (reply->error() != QNetworkReply::NoError || status != 200) {
         // A missing index just means we guessed the generation wrong.
         if (status == 404 || status == 400) {
-            sendRequest(query, limit, candidateIndex + 1);
+            sendRequest(kind, query, limit, candidateIndex + 1);
             return;
         }
-        QVector<PackageResult> stale;
-        if (loadFromCache(query, limit, &stale, true)) {
-            emit resultsReady(query, stale, true);
+        QByteArray stale;
+        if (loadFromCache(kind, query, limit, &stale, true)) {
+            emitResults(kind, query, stale, true);
             emit failed(tr("Search failed (%1); showing cached results.").arg(reply->errorString()));
         } else {
             emit failed(tr("Search failed: %1").arg(reply->errorString()));
@@ -323,9 +398,46 @@ void PackageSearch::handleReply(const QString &query, int limit, int candidateIn
         QSettings().setValue(QStringLiteral("search/indexGeneration"), generation);
     }
 
-    storeInCache(query, limit, body);
-    emit resultsReady(query, parseResponse(body), false);
+    storeInCache(kind, query, limit, body);
+    emitResults(kind, query, body, false);
     emit busyChanged(false);
+}
+
+QVector<OptionResult> PackageSearch::parseOptionResponse(const QByteArray &json)
+{
+    QVector<OptionResult> out;
+    const QJsonDocument doc = QJsonDocument::fromJson(json);
+    const QJsonArray hits = doc.object()
+                                .value(QStringLiteral("hits"))
+                                .toObject()
+                                .value(QStringLiteral("hits"))
+                                .toArray();
+
+    // Descriptions arrive as HTML wrapped in a <rendered-html> element.
+    static const QRegularExpression tags(QStringLiteral("<[^>]+>"));
+
+    out.reserve(hits.size());
+    for (const QJsonValue &hit : hits) {
+        const QJsonObject src = hit.toObject().value(QStringLiteral("_source")).toObject();
+        OptionResult r;
+        r.name = src.value(QStringLiteral("option_name")).toString();
+        r.type = src.value(QStringLiteral("option_type")).toString();
+        r.defaultValue = firstString(src.value(QStringLiteral("option_default")));
+        if (r.defaultValue.isEmpty())
+            r.defaultValue = src.value(QStringLiteral("option_default")).toVariant().toString();
+        r.example = firstString(src.value(QStringLiteral("option_example")));
+        if (r.example.isEmpty())
+            r.example = src.value(QStringLiteral("option_example")).toVariant().toString();
+        r.source = src.value(QStringLiteral("option_source")).toString();
+
+        QString description = src.value(QStringLiteral("option_description")).toString();
+        description.remove(tags);
+        r.description = description.simplified();
+
+        if (!r.name.isEmpty())
+            out.push_back(r);
+    }
+    return out;
 }
 
 QVector<PackageResult> PackageSearch::parseResponse(const QByteArray &json)

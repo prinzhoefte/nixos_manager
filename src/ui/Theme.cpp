@@ -287,6 +287,12 @@ void paintIcon(QPainter *p, const QString &name, const QColor &colour, int size)
         p->setBrush(colour);
         p->drawEllipse(QPointF(9, 7.5), 2.6, 2.6);
         p->drawEllipse(QPointF(15.5, 16.5), 2.6, 2.6);
+    } else if (name == QLatin1String("options")) {
+        // A key: options are the knobs that unlock behaviour.
+        p->drawEllipse(QPointF(8, 9), 4.6, 4.6);
+        p->drawLine(QPointF(11.3, 12.3), QPointF(20, 21));
+        p->drawLine(QPointF(17.5, 18.5), QPointF(15.5, 20.5));
+        p->drawLine(QPointF(20, 21), QPointF(18, 23));
     } else if (name == QLatin1String("broom")) {
         p->drawLine(QPointF(16.5, 4), QPointF(10.5, 10));
         QPainterPath head;
@@ -745,28 +751,28 @@ QPixmap Theme::logoPixmap(int size, qreal devicePixelRatio)
     tile.setColorAt(1.0, c.ink);
     p.setPen(Qt::NoPen);
     p.setBrush(tile);
-    p.drawRoundedRect(QRectF(0, 0, 100, 100), 26, 26);
+    p.drawRoundedRect(QRectF(0, 0, 100, 100), 23, 23);
 
-    // "JR" monogram.
-    QFont mono(uiFontFamily());
-    mono.setPixelSize(40);
-    mono.setWeight(QFont::Bold);
-    mono.setLetterSpacing(QFont::AbsoluteSpacing, -2);
-    p.setFont(mono);
+    // "JR" monogram. Manrope when it is installed, otherwise the fallback sans.
+    QFont monogram(uiFontFamily());
+    monogram.setPixelSize(38);
+    monogram.setWeight(QFont::Bold);
+    monogram.setLetterSpacing(QFont::AbsoluteSpacing, -1.5);
+    p.setFont(monogram);
     p.setPen(c.lightBlue);
-    p.drawText(QRectF(0, 16, 100, 58), Qt::AlignCenter, QStringLiteral("JR"));
+    p.drawText(QRectF(0, 12, 100, 56), Qt::AlignCenter, QStringLiteral("JR"));
 
     // Circuit traces leading to the nodes.
     p.setBrush(Qt::NoBrush);
-    p.setPen(QPen(c.accent, 2.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    p.setPen(QPen(c.accent, 2.9, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
     QPainterPath left;
-    left.moveTo(20, 78);
+    left.moveTo(19, 78);
     left.lineTo(38, 78);
     left.lineTo(38, 70);
     p.drawPath(left);
-    p.drawLine(QPointF(50, 78), QPointF(50, 72));
+    p.drawLine(QPointF(50, 78), QPointF(50, 73));
     QPainterPath right;
-    right.moveTo(80, 78);
+    right.moveTo(81, 78);
     right.lineTo(62, 78);
     right.lineTo(62, 70);
     p.drawPath(right);
@@ -774,10 +780,10 @@ QPixmap Theme::logoPixmap(int size, qreal devicePixelRatio)
     // Amber nodes — the single warm accent in the whole mark.
     p.setPen(Qt::NoPen);
     p.setBrush(c.amber);
-    p.drawEllipse(QPointF(38, 68), 3.4, 3.4);
-    p.drawEllipse(QPointF(62, 68), 3.4, 3.4);
+    p.drawEllipse(QPointF(38, 66.6), 3.7, 3.7);
+    p.drawEllipse(QPointF(62, 66.6), 3.7, 3.7);
     p.setBrush(c.accent);
-    p.drawEllipse(QPointF(50, 71), 3.4, 3.4);
+    p.drawEllipse(QPointF(50, 69.8), 3.7, 3.7);
 
     return pm;
 }

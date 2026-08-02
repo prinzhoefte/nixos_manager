@@ -306,6 +306,91 @@ in
         CHECK_EQ(l->entries.size(), qsizetype(1));
 }
 
+static void testAttrSetInsertion()
+{
+    // The alignment of the existing members has to be carried over.
+    const QString src = R"NIX({
+    outputs = { self, nixpkgs, ... }@inputs:
+    let mkHost = hostModule: nixpkgs.lib.nixosSystem { modules = [ hostModule ]; };
+    in {
+        nixosConfigurations = {
+            main-pc             = mkHost ./hosts/main-pc;
+            t420                = mkHost ./hosts/t420;
+        };
+    };
+}
+)NIX";
+    NixFile f = fromText(src);
+
+    const NixAttrSet *set = f.findSet(QStringLiteral("outputs.nixosConfigurations"));
+    CHECK(set != nullptr);
+
+    CHECK(f.addToAttrSet(QStringLiteral("outputs.nixosConfigurations"),
+        QStringLiteral("laptop"), QStringLiteral("mkHost ./hosts/laptop")));
+    CHECK(f.text().contains(
+        QStringLiteral("            laptop              = mkHost ./hosts/laptop;")));
+
+    // It lands inside the set, after the last member.
+    const int laptop = f.text().indexOf(QStringLiteral("laptop  "));
+    const int closing = f.text().indexOf(QStringLiteral("        };"));
+    CHECK(laptop > 0);
+    CHECK(laptop < closing);
+    CHECK(f.findAttr(QStringLiteral("outputs.nixosConfigurations.laptop")) != nullptr);
+
+    // Adding the same name again updates the value rather than duplicating it.
+    CHECK(f.addToAttrSet(QStringLiteral("outputs.nixosConfigurations"),
+        QStringLiteral("laptop"), QStringLiteral("mkHost ./hosts/other")));
+    CHECK(f.text().contains(QStringLiteral("mkHost ./hosts/other")));
+    CHECK(!f.text().contains(QStringLiteral("mkHost ./hosts/laptop")));
+    CHECK_EQ(f.text().count(QStringLiteral("laptop ")), 1);
+
+    // An unknown set is reported rather than silently appended somewhere.
+    CHECK(!f.addToAttrSet(QStringLiteral("nope.missing"), QStringLiteral("x"),
+        QStringLiteral("1")));
+}
+
+static void testOptionEditing()
+{
+    const QString src = R"NIX({ pkgs, ... }:
+
+{
+    networking.hostName = "main-pc";
+    services.teamviewer.enable = true;
+
+    users.users.justin = {
+        isNormalUser = true;
+        description  = "Justin";
+    };
+}
+)NIX";
+    NixFile f = fromText(src);
+
+    // Edit in place.
+    CHECK(f.setAttribute(QStringLiteral("services.teamviewer.enable"),
+        QStringLiteral("false")));
+    CHECK(f.text().contains(QStringLiteral("services.teamviewer.enable = false;")));
+
+    // Edit a value nested inside an attrset, without disturbing its siblings.
+    CHECK(f.setAttribute(QStringLiteral("users.users.justin.description"),
+        QStringLiteral("\"Justin R\"")));
+    CHECK(f.text().contains(QStringLiteral("description  = \"Justin R\";")));
+    CHECK(f.text().contains(QStringLiteral("isNormalUser = true;")));
+
+    // Add a brand new one.
+    CHECK(f.setAttribute(QStringLiteral("services.openssh.enable"), QStringLiteral("true")));
+    CHECK(f.text().contains(QStringLiteral("    services.openssh.enable = true;\n}")));
+
+    // Remove it again; the rest of the file is untouched.
+    CHECK(f.removeAttribute(QStringLiteral("services.openssh.enable")));
+    CHECK(!f.text().contains(QStringLiteral("openssh")));
+    CHECK(f.text().contains(QStringLiteral("networking.hostName = \"main-pc\";")));
+
+    // Removing a nested option leaves the enclosing set intact.
+    CHECK(f.removeAttribute(QStringLiteral("users.users.justin.description")));
+    CHECK(!f.text().contains(QStringLiteral("Justin R")));
+    CHECK(f.findAttr(QStringLiteral("users.users.justin.isNormalUser")) != nullptr);
+}
+
 static void testFlakeHosts()
 {
     QTemporaryDir dir;
@@ -404,6 +489,8 @@ int main(int argc, char **argv)
     testPackages();
     testAttributes();
     testOptionDeclarations();
+    testAttrSetInsertion();
+    testOptionEditing();
     testFlakeHosts();
     testSingleFileProject();
 

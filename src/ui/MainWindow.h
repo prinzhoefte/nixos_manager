@@ -16,6 +16,7 @@ class EditorPage;
 class HostsPage;
 class LogPane;
 class ModulesPage;
+class OptionsPage;
 class PackagesPage;
 class SystemPage;
 
@@ -58,6 +59,7 @@ private:
     HostsPage *m_hosts = nullptr;
     ModulesPage *m_modules = nullptr;
     PackagesPage *m_packages = nullptr;
+    OptionsPage *m_options = nullptr;
     EditorPage *m_editor = nullptr;
     SystemPage *m_system = nullptr;
 

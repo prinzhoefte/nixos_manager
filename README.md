@@ -37,6 +37,17 @@ Ticking a module that is not imported yet adds it, and it lands in the right
 Modules the flake adds to *every* host (a shared `modules = [ … ]` inside a
 `mkHost` helper, for instance) are shown as such and are not togglable per host.
 
+**New host…** creates `hosts/<name>/default.nix`, optionally copying another
+host's imports (section comments and commented-out lines included), writes a
+clearly-marked `hardware-configuration.nix` placeholder, and registers the host
+in `flake.nix` — matching whatever the neighbouring entries do, right down to
+their `=` alignment:
+
+```diff
+             wladi-server        = mkHost ./hosts/wladi-server;
++            laptop              = mkHost ./hosts/laptop;
+```
+
 **Modules** — browse everything under `modules/`, grouped by category: which
 hosts use each one, the packages it installs, the settings it makes and the
 options it declares. Creates new modules from a few templates.
@@ -50,6 +61,19 @@ pane lists every package already in the configuration, grouped by file, and can
 remove or comment out individual entries.
 
 Results are cached on disk, so repeat searches work offline.
+
+**Options** — add, edit and remove NixOS options. The left half searches the
+NixOS option index — the same data as the *Options* tab on search.nixos.org —
+so you can check an option's type, default, example and declaring module before
+setting it. Pick the file to write to, give a value, and it is inserted into
+that file. The right half lists every option your configuration actually sets,
+grouped by file: double-click a value to edit it in place, or remove the binding
+entirely. Options your own modules declare with `lib.mkOption` are filtered out
+of the list, since those are the module's API rather than a setting.
+
+Values are passed through as-is when they already look like Nix
+(`[ "wheel" ]`, `pkgs.foo`, `lib.mkForce 1`), and quoted when they are plainly
+a bare string.
 
 **Editor** — a syntax-highlighted Nix editor over the very same buffers the
 other pages edit. Anything the app does not model can still be changed by hand,
@@ -200,9 +224,9 @@ The interesting part is `src/core`, which has no UI dependency:
 | File | Responsibility |
 | --- | --- |
 | `NixLexer.{h,cpp}` | Tokenizes Nix. Handles `''…''` strings, `${…}` interpolation (including nested strings and braces), path literals versus the `/` and `//` operators, and both comment forms. Strings come out as single tokens, so scanning for brackets never trips over their contents. |
-| `NixFile.{h,cpp}` | Walks the token stream keeping an attribute-path prefix stack, so `users.users.justin.description` is found whether it is written flat or nested. Recurses through `lib.mkIf` / `lib.mkMerge` wrappers, records `lib.mkOption` declarations with their type, default and description, and captures the exact byte range of every import, list entry and value. Mutations are range replacements on the original text. |
+| `NixFile.{h,cpp}` | Walks the token stream keeping an attribute-path prefix stack, so `users.users.justin.description` is found whether it is written flat or nested. Recurses through `lib.mkIf` / `lib.mkMerge` wrappers and `let … in` preludes, records `lib.mkOption` declarations with their type, default and description, and captures the exact byte range of every import, list entry, attribute set and value. Mutations are range replacements on the original text. |
 | `ConfigProject.{h,cpp}` | Discovers hosts from `nixosConfigurations`, resolves each one's entry file, catalogues modules by category, reads flake inputs and the nixpkgs channel, and owns the shared file buffers. |
-| `PackageSearch.{h,cpp}` | Queries the search.nixos.org Elasticsearch index with an on-disk cache. Probes the index schema generation and remembers what answered, so an upstream bump does not break the app. |
+| `PackageSearch.{h,cpp}` | Queries the search.nixos.org Elasticsearch index — packages and NixOS options — with an on-disk cache. Probes the index schema generation and remembers what answered, so an upstream bump does not break the app. |
 | `CommandRunner.{h,cpp}` | Sequences external commands, merges their output, handles privilege escalation and cancellation. |
 | `SystemOps.{h,cpp}` | Builds the argument lists for rebuilds, generations, flake updates and cleanup. Runs nothing itself. |
 
@@ -233,6 +257,8 @@ live in `~/.config/nixos-manager/nixos-manager.conf`.
   flake pins but is not evaluated against your exact locked revision.
 - Deploying to other machines over SSH is not implemented; rebuilds target the
   machine the app runs on.
+- A new host's `hardware-configuration.nix` is a placeholder. Only
+  `nixos-generate-config` on the target machine can produce the real one.
 
 ## Licence
 

@@ -22,6 +22,16 @@ struct PackageResult {
     QString position;          // nixpkgs source position, if known
 };
 
+/// One NixOS option from the index.
+struct OptionResult {
+    QString name;           // "services.openssh.enable"
+    QString type;           // "boolean", "list of string", …
+    QString description;    // plain text, the index ships HTML
+    QString defaultValue;
+    QString example;
+    QString source;         // declaring file inside nixpkgs
+};
+
 /// Searches nixpkgs.
 ///
 /// The online index behind search.nixos.org is the primary source: it is fast,
@@ -44,6 +54,8 @@ public:
     int cacheTtlHours() const { return m_ttlHours; }
 
     void search(const QString &query, int limit = 60);
+    /// Same index, `type: option` instead of `type: package`.
+    void searchOptions(const QString &query, int limit = 60);
     void cancel();
     bool isBusy() const { return m_reply != nullptr; }
 
@@ -52,19 +64,25 @@ public:
 
 signals:
     void resultsReady(const QString &query, const QVector<PackageResult> &results, bool fromCache);
+    void optionResultsReady(const QString &query, const QVector<OptionResult> &results,
+        bool fromCache);
     void failed(const QString &message);
     void busyChanged(bool busy);
 
 private:
     /// `candidateIndex` walks the list of plausible index generations.
-    void sendRequest(const QString &query, int limit, int candidateIndex);
-    void handleReply(const QString &query, int limit, int candidateIndex);
-    QByteArray buildQueryBody(const QString &query, int limit) const;
-    QString cachePathFor(const QString &query, int limit) const;
-    bool loadFromCache(const QString &query, int limit, QVector<PackageResult> *out,
+    enum class Kind { Package, Option };
+
+    void sendRequest(Kind kind, const QString &query, int limit, int candidateIndex);
+    void handleReply(Kind kind, const QString &query, int limit, int candidateIndex);
+    QByteArray buildQueryBody(Kind kind, const QString &query, int limit) const;
+    QString cachePathFor(Kind kind, const QString &query, int limit) const;
+    bool loadFromCache(Kind kind, const QString &query, int limit, QByteArray *out,
         bool ignoreExpiry) const;
-    void storeInCache(const QString &query, int limit, const QByteArray &payload) const;
+    void storeInCache(Kind kind, const QString &query, int limit, const QByteArray &payload) const;
+    void emitResults(Kind kind, const QString &query, const QByteArray &json, bool fromCache);
     static QVector<PackageResult> parseResponse(const QByteArray &json);
+    static QVector<OptionResult> parseOptionResponse(const QByteArray &json);
 
     QNetworkAccessManager *m_net = nullptr;
     QNetworkReply *m_reply = nullptr;
