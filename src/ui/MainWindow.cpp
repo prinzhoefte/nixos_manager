@@ -171,6 +171,17 @@ void MainWindow::buildUi()
         m_packages->refresh();
         m_options->refresh();
     };
+    // Creating or deleting files changes what every page can see, so those go
+    // through a full refresh rather than the buffer-level update above.
+    auto onStructureChanged = [this] { refreshAll(); };
+    connect(m_hosts, &HostsPage::projectStructureChanged, this, onStructureChanged);
+    connect(m_modules, &ModulesPage::projectStructureChanged, this, onStructureChanged);
+    connect(m_editor, &EditorPage::projectStructureChanged, this, onStructureChanged);
+
+    connect(m_hosts, &HostsPage::saveRequested, this, [this] { saveAll(); });
+    connect(m_modules, &ModulesPage::saveRequested, this, [this] { saveAll(); });
+    connect(m_editor, &EditorPage::saveRequested, this, [this] { saveAll(); });
+
     connect(m_hosts, &HostsPage::configModified, this, onModified);
     connect(m_modules, &ModulesPage::configModified, this, onModified);
     connect(m_packages, &PackagesPage::configModified, this, onModified);

@@ -1,10 +1,12 @@
 #include "EditorPage.h"
 
+#include "FileOps.h"
 #include "NixHighlighter.h"
 #include "Theme.h"
 #include "core/ConfigProject.h"
 #include "core/NixFile.h"
 
+#include <QAction>
 #include <QApplication>
 #include <QDir>
 #include <QFileInfo>
@@ -12,7 +14,9 @@
 #include <QFontDatabase>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QItemSelectionModel>
 #include <QLabel>
+#include <QMenu>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QScrollBar>
@@ -49,9 +53,19 @@ void EditorPage::buildUi()
         m_tree->hideColumn(col);
     m_tree->setHeaderHidden(true);
     m_tree->setAnimated(false);
+    m_tree->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_tree, &QTreeView::activated, this, &EditorPage::onTreeActivated);
     connect(m_tree, &QTreeView::clicked, this, &EditorPage::onTreeActivated);
+    connect(m_tree, &QTreeView::customContextMenuRequested, this, &EditorPage::showTreeMenu);
     splitter->addWidget(m_tree);
+
+    // Del works on the file tree only; in the text pane it deletes characters.
+    auto *deleteShortcut = new QAction(tr("Delete"), m_tree);
+    deleteShortcut->setShortcut(QKeySequence::Delete);
+    deleteShortcut->setShortcutContext(Qt::WidgetShortcut);
+    connect(deleteShortcut, &QAction::triggered, this, &EditorPage::deleteSelected);
+    m_tree->addAction(deleteShortcut);
 
     auto *right = new QWidget(splitter);
     auto *rightLayout = new QVBoxLayout(right);
@@ -69,6 +83,18 @@ void EditorPage::buildUi()
     m_reload->setEnabled(false);
     connect(m_reload, &QPushButton::clicked, this, &EditorPage::reloadFromDisk);
     headerRow->addWidget(m_reload);
+
+    m_delete = new QPushButton(tr("Delete file…"), right);
+    m_delete->setIcon(Theme::icon(QStringLiteral("trash")));
+    m_delete->setProperty("danger", true);
+    m_delete->setToolTip(tr("Delete the file being edited and clean up the imports that point "
+                            "at it."));
+    m_delete->setEnabled(false);
+    connect(m_delete, &QPushButton::clicked, this, [this] {
+        if (!m_currentPath.isEmpty())
+            deletePaths({ m_currentPath });
+    });
+    headerRow->addWidget(m_delete);
     rightLayout->addLayout(headerRow);
 
     m_editor = new QPlainTextEdit(right);
@@ -105,10 +131,15 @@ void EditorPage::refresh()
     if (!m_ctx.project || !m_ctx.project->isOpen()) {
         m_editor->clear();
         m_editor->setEnabled(false);
+        m_delete->setEnabled(false);
         m_currentPath.clear();
         m_header->setText(tr("No configuration open"));
         return;
     }
+
+    // The file being edited may have been deleted from another page.
+    if (!m_currentPath.isEmpty() && !QFileInfo::exists(m_currentPath))
+        closeFile();
 
     const QString root = m_ctx.project->root();
     m_fsModel->setRootPath(root);
@@ -149,6 +180,7 @@ void EditorPage::openFile(const QString &absPath)
         m_editor->setEnabled(false);
         m_reload->setEnabled(false);
     }
+    m_delete->setEnabled(m_ctx.project && m_ctx.project->containsPath(m_currentPath));
     m_loading = false;
 
     if (m_ctx.project) {
@@ -234,6 +266,91 @@ void EditorPage::reloadFromDisk()
     emit configModified();
 }
 
+QStringList EditorPage::selectedPaths() const
+{
+    QStringList paths;
+    const auto indexes = m_tree->selectionModel()->selectedIndexes();
+    for (const QModelIndex &index : indexes) {
+        if (index.column() != 0)
+            continue;
+        const QString path = m_fsModel->filePath(index);
+        if (!path.isEmpty() && !paths.contains(path))
+            paths << path;
+    }
+    return paths;
+}
+
+void EditorPage::showTreeMenu(const QPoint &pos)
+{
+    const QModelIndex index = m_tree->indexAt(pos);
+    if (!index.isValid())
+        return;
+    if (!m_tree->selectionModel()->isSelected(index))
+        m_tree->setCurrentIndex(index);
+
+    const QString path = m_fsModel->filePath(index);
+    const QStringList selection = selectedPaths();
+
+    QMenu menu(this);
+    if (QFileInfo(path).isFile()) {
+        QAction *open = menu.addAction(Theme::icon(QStringLiteral("editor")), tr("Open"));
+        connect(open, &QAction::triggered, this, [this, path] { openFile(path); });
+    }
+    QAction *remove = menu.addAction(Theme::icon(QStringLiteral("trash")),
+        selection.size() == 1 ? tr("Delete…") : tr("Delete %1 items…").arg(selection.size()));
+    remove->setEnabled(!selection.isEmpty());
+    connect(remove, &QAction::triggered, this, &EditorPage::deleteSelected);
+    menu.exec(m_tree->viewport()->mapToGlobal(pos));
+}
+
+void EditorPage::deleteSelected()
+{
+    deletePaths(selectedPaths());
+}
+
+void EditorPage::deletePaths(const QStringList &paths)
+{
+    if (paths.isEmpty())
+        return;
+
+    // Anything typed but not yet pushed into the buffer would be written back
+    // by the save that follows, so settle the buffer first.
+    if (m_debounce->isActive()) {
+        m_debounce->stop();
+        commitToBuffer();
+    }
+
+    const FileOps::DeleteOutcome outcome = FileOps::deletePaths(this, m_ctx, paths);
+    if (!outcome.changed)
+        return;
+
+    for (const QString &gone : outcome.deleted) {
+        if (m_currentPath == gone
+            || m_currentPath.startsWith(gone + QLatin1Char('/'))) {
+            closeFile();
+            break;
+        }
+    }
+
+    if (!outcome.status.isEmpty())
+        emit statusMessage(outcome.status);
+    emit projectStructureChanged();
+    if (outcome.needsSave)
+        FileOps::whenIdle(m_ctx, this, [this] { emit saveRequested(); });
+}
+
+void EditorPage::closeFile()
+{
+    m_currentPath.clear();
+    m_loading = true;
+    m_editor->clear();
+    m_loading = false;
+    m_editor->setEnabled(false);
+    m_reload->setEnabled(false);
+    m_delete->setEnabled(false);
+    m_header->setText(tr("No file open"));
+}
+
 void EditorPage::applyTheme()
 {
     m_highlighter->setDarkMode(Theme::isDark());
@@ -241,6 +358,7 @@ void EditorPage::applyTheme()
     code.setPointSizeF(QApplication::font().pointSizeF() + 0.5);
     m_editor->setFont(code);
     m_reload->setIcon(Theme::icon(QStringLiteral("reload")));
+    m_delete->setIcon(Theme::icon(QStringLiteral("trash")));
 }
 
 } // namespace nixm

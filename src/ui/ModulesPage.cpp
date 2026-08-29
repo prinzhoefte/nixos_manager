@@ -1,9 +1,11 @@
 #include "ModulesPage.h"
 
+#include "FileOps.h"
 #include "Theme.h"
 #include "core/ConfigProject.h"
 #include "core/NixFile.h"
 
+#include <QAction>
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -15,6 +17,7 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSplitter>
@@ -84,13 +87,25 @@ void ModulesPage::buildUi()
     m_tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_tree->header()->setStretchLastSection(false);
     m_tree->setColumnWidth(1, 70);
+    m_tree->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_tree, &QTreeWidget::currentItemChanged, this, &ModulesPage::onSelectionChanged);
+    connect(m_tree, &QTreeWidget::itemSelectionChanged, this, &ModulesPage::onSelectionChanged);
+    connect(m_tree, &QTreeWidget::customContextMenuRequested, this,
+        &ModulesPage::showContextMenu);
     connect(m_tree, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item, int) {
         const QString path = item->data(0, kRoleAbsPath).toString();
         if (!path.isEmpty())
             emit openFileRequested(path);
     });
     leftLayout->addWidget(m_tree, 1);
+
+    // Del on the tree does what the button does; nowhere else in the page.
+    auto *deleteShortcut = new QAction(tr("Delete module"), m_tree);
+    deleteShortcut->setShortcut(QKeySequence::Delete);
+    deleteShortcut->setShortcutContext(Qt::WidgetShortcut);
+    connect(deleteShortcut, &QAction::triggered, this, &ModulesPage::deleteSelected);
+    m_tree->addAction(deleteShortcut);
 
     auto *buttons = new QHBoxLayout;
     auto *create = new QPushButton(tr("New module…"), left);
@@ -99,6 +114,15 @@ void ModulesPage::buildUi()
     connect(create, &QPushButton::clicked, this, &ModulesPage::createModule);
     buttons->addWidget(create);
     buttons->addStretch(1);
+
+    m_delete = new QPushButton(tr("Delete…"), left);
+    m_delete->setIcon(Theme::icon(QStringLiteral("trash")));
+    m_delete->setProperty("danger", true);
+    m_delete->setToolTip(tr("Delete the selected module files and clean up the imports that "
+                            "point at them."));
+    m_delete->setEnabled(false);
+    connect(m_delete, &QPushButton::clicked, this, &ModulesPage::deleteSelected);
+    buttons->addWidget(m_delete);
     leftLayout->addLayout(buttons);
 
     splitter->addWidget(left);
@@ -219,11 +243,76 @@ QStringList ModulesPage::hostsUsing(const QString &absModulePath) const
     return out;
 }
 
+QStringList ModulesPage::selectedModules() const
+{
+    QStringList paths;
+    const auto selected = m_tree->selectedItems();
+    for (QTreeWidgetItem *item : selected) {
+        const QString path = item->data(0, kRoleAbsPath).toString();
+        if (!path.isEmpty()) {
+            if (!paths.contains(path))
+                paths << path;
+            continue;
+        }
+        // A category row stands for the modules under it.
+        for (int i = 0; i < item->childCount(); ++i) {
+            const QString child = item->child(i)->data(0, kRoleAbsPath).toString();
+            if (!child.isEmpty() && !item->child(i)->isHidden() && !paths.contains(child))
+                paths << child;
+        }
+    }
+    return paths;
+}
+
+void ModulesPage::showContextMenu(const QPoint &pos)
+{
+    QTreeWidgetItem *item = m_tree->itemAt(pos);
+    if (!item)
+        return;
+    if (!item->isSelected())
+        m_tree->setCurrentItem(item);
+
+    const QString path = item->data(0, kRoleAbsPath).toString();
+    const QStringList selection = selectedModules();
+
+    QMenu menu(this);
+    if (!path.isEmpty()) {
+        QAction *open = menu.addAction(Theme::icon(QStringLiteral("editor")),
+            tr("Open in editor"));
+        connect(open, &QAction::triggered, this, [this, path] { emit openFileRequested(path); });
+    }
+    QAction *remove = menu.addAction(Theme::icon(QStringLiteral("trash")),
+        selection.size() == 1 ? tr("Delete module…")
+                              : tr("Delete %1 modules…").arg(selection.size()));
+    remove->setEnabled(!selection.isEmpty());
+    connect(remove, &QAction::triggered, this, &ModulesPage::deleteSelected);
+    menu.exec(m_tree->viewport()->mapToGlobal(pos));
+}
+
+void ModulesPage::deleteSelected()
+{
+    const QStringList paths = selectedModules();
+    if (paths.isEmpty())
+        return;
+
+    const FileOps::DeleteOutcome outcome = FileOps::deletePaths(this, m_ctx, paths);
+    if (!outcome.changed)
+        return;
+
+    refresh();
+    if (!outcome.status.isEmpty())
+        emit statusMessage(outcome.status);
+    emit projectStructureChanged();
+    if (outcome.needsSave)
+        FileOps::whenIdle(m_ctx, this, [this] { emit saveRequested(); });
+}
+
 void ModulesPage::onSelectionChanged()
 {
     auto *item = m_tree->currentItem();
     const QString path = item ? item->data(0, kRoleAbsPath).toString() : QString();
     m_open->setEnabled(!path.isEmpty());
+    m_delete->setEnabled(!selectedModules().isEmpty());
 
     if (path.isEmpty()) {
         m_title->clear();
@@ -411,7 +500,7 @@ void ModulesPage::createModule()
 
     m_ctx.project->rescan();
     emit statusMessage(tr("Created %1").arg(QDir(m_ctx.project->root()).relativeFilePath(absPath)));
-    emit configModified();
+    emit projectStructureChanged();
     emit openFileRequested(absPath);
 }
 
@@ -419,6 +508,7 @@ void ModulesPage::applyTheme()
 {
     m_details->document()->setDefaultStyleSheet(Theme::richTextCss());
     m_open->setIcon(Theme::icon(QStringLiteral("editor")));
+    m_delete->setIcon(Theme::icon(QStringLiteral("trash")));
     refresh();
 }
 

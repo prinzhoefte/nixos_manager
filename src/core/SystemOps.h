@@ -74,5 +74,11 @@ bool nixSupportsFlakeUpdateInput();
 /// root-owned and a plain write was refused.
 CommandRunner::Step installFileAsRoot(const QString &tempPath, const QString &destination);
 
+/// Removes a file or directory with root privileges, the counterpart of
+/// installFileAsRoot for a root-owned tree. Refuses anything that is not a
+/// nested path, so a mistake upstream cannot turn into `rm -rf /`; the caller
+/// must treat a step with an empty `program` as "not possible".
+CommandRunner::Step removePathAsRoot(const QString &path);
+
 } // namespace SystemOps
 } // namespace nixm

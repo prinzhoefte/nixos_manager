@@ -2,8 +2,8 @@
 
 A Qt 6 desktop front end for NixOS configurations. It reads a flake with several
 `nixosConfigurations` — or a plain `configuration.nix` — and lets you toggle
-modules per host, search nixpkgs and add packages, then rebuild, roll back or
-garbage-collect the system, without leaving the app.
+modules per host, add and delete module files, search nixpkgs and add packages,
+then rebuild, roll back or garbage-collect the system, without leaving the app.
 
 Edits are written back as **minimal in-place changes**. Your indentation,
 alignment and `# ── Section ──` comments survive; a diff after adding a package
@@ -50,7 +50,36 @@ their `=` alignment:
 
 **Modules** — browse everything under `modules/`, grouped by category: which
 hosts use each one, the packages it installs, the settings it makes and the
-options it declares. Creates new modules from a few templates.
+options it declares. Creates new modules from a few templates, and deletes them
+again.
+
+**Deleting files** — the counterpart to creating them. *Delete…* on the Modules
+tab, *Delete host…* on the Hosts tab, and the file tree's context menu (or `Del`)
+on the Editor tab all lead to the same confirmation, which is a report rather
+than a yes/no box. It lists what is about to go — with a warning when the path
+plays a special role, such as a host's entry file — every import in the tree that
+points at it, and what will happen to those imports:
+
+- **Remove the import lines** — the default.
+- **Comment the import lines out** — the same treatment as unticking a module.
+- **Leave them alone** — for when you are about to rewrite them yourself.
+
+Deletion goes to the **trash** by default, so a mistake is recoverable; a plain
+delete is one tick away, and is used automatically when the tree lives on a
+filesystem without a trash. Selecting a category row on the Modules tab, or
+several files in the editor's tree, deletes them in one go, and a host's whole
+directory goes with it when you delete a host.
+
+References the app cannot rewrite safely are reported instead of guessed at. A
+host registered as `main-pc = mkHost ./hosts/main-pc;` is a binding, not a list
+entry, so deleting a host takes its `nixosConfigurations` entry out of
+`flake.nix` explicitly, and anything else of that shape is named for you to fix
+in the Editor tab.
+
+The rewritten files are saved straight away, since the files themselves are
+already gone — untick *Save the configuration files straight away* if you would
+rather look at the diff first. On a root-owned tree the removal goes through the
+same privilege escalation as saving does, as a visible `rm` in the log pane.
 
 **Packages** — a package manager UI. Searches the same index as
 search.nixos.org, so results are instant and carry versions, descriptions,
@@ -296,7 +325,7 @@ The interesting part is `src/core`, which has no UI dependency:
 | --- | --- |
 | `NixLexer.{h,cpp}` | Tokenizes Nix. Handles `''…''` strings, `${…}` interpolation (including nested strings and braces), path literals versus the `/` and `//` operators, and both comment forms. Strings come out as single tokens, so scanning for brackets never trips over their contents. |
 | `NixFile.{h,cpp}` | Walks the token stream keeping an attribute-path prefix stack, so `users.users.justin.description` is found whether it is written flat or nested. Recurses through `lib.mkIf` / `lib.mkMerge` wrappers and `let … in` preludes, records `lib.mkOption` declarations with their type, default and description, and captures the exact byte range of every import, list entry, attribute set and value. Mutations are range replacements on the original text. |
-| `ConfigProject.{h,cpp}` | Discovers hosts from `nixosConfigurations`, resolves each one's entry file, catalogues modules by category, reads flake inputs and the nixpkgs channel, and owns the shared file buffers. |
+| `ConfigProject.{h,cpp}` | Discovers hosts from `nixosConfigurations`, resolves each one's entry file, catalogues modules by category, reads flake inputs and the nixpkgs channel, and owns the shared file buffers. Also finds every reference to a file — import lists, module lists and plain bindings alike — and deletes files, rewriting those references first. |
 | `PackageSearch.{h,cpp}` | Queries the search.nixos.org Elasticsearch index — packages and NixOS options — with an on-disk cache. Probes the index schema generation and remembers what answered, so an upstream bump does not break the app. |
 | `CommandRunner.{h,cpp}` | Sequences external commands, merges their output, handles privilege escalation and cancellation. |
 | `SystemOps.{h,cpp}` | Builds the argument lists for rebuilds, flake updates and cleanup. Reads system generations straight out of `/nix/var/nix/profiles`, so it needs no `nix` on PATH and no particular locale; `nix-env` is only a fallback. |
@@ -330,6 +359,11 @@ live in `~/.config/nixos-manager/nixos-manager.conf`.
   flake pins but is not evaluated against your exact locked revision.
 - Deploying to other machines over SSH is not implemented; rebuilds target the
   machine the app runs on.
+- Deleting a file rewrites the imports that point at it, but only where they are
+  list entries. A path used inside a larger expression is reported and left for
+  you; nothing tries to guess what the expression around it should become.
+- Renaming and moving files is not implemented yet — create, delete and the
+  Editor tab are the file-level operations the app offers.
 - A new host's `hardware-configuration.nix` is a placeholder. Only
   `nixos-generate-config` on the target machine can produce the real one.
 - Git operations run as your user. On a root-owned tree git will refuse with

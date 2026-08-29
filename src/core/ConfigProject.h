@@ -31,6 +31,50 @@ struct FlakeInput {
     QString lastModified;
 };
 
+/// How a reference is written, which decides whether it can be rewritten
+/// without guessing at the surrounding expression.
+enum class ReferenceKind {
+    Import,      ///< an entry of the file's own top-level `imports` list
+    ListEntry,   ///< an entry of another list, e.g. the flake's shared `modules`
+    Binding      ///< a path inside a plain binding (`main-pc = mkHost ./hosts/main-pc`)
+};
+
+/// One place in the tree that points at a file.
+struct FileReference {
+    QString file;        // absolute path of the file holding the reference
+    QString relFile;     // that path relative to the project root
+    QString owner;       // "imports", "outputs.…modules", "nixosConfigurations.t420"
+    QString literal;     // the path literal exactly as written
+    ReferenceKind kind = ReferenceKind::Import;
+    bool enabled = true; // false when the entry is commented out
+    int line = 0;
+
+    /// True when removing or commenting the reference out is a safe edit.
+    bool rewritable() const { return kind != ReferenceKind::Binding; }
+};
+
+/// What to do with the references to a file that is being deleted.
+enum class ReferenceAction {
+    Leave,      ///< change nothing; the tree will not evaluate until fixed
+    Disable,    ///< comment the entry out, the way unticking a module does
+    Remove      ///< delete the entry
+};
+
+struct DeleteRequest {
+    QStringList paths;                                  ///< absolute files or directories
+    bool toTrash = true;                                ///< move to the desktop trash if possible
+    ReferenceAction references = ReferenceAction::Remove;
+};
+
+struct DeleteResult {
+    QStringList deleted;          ///< paths that are gone from disk
+    QStringList trashed;          ///< subset of `deleted` that went to the trash
+    QStringList needsPrivilege;   ///< paths a plain removal was refused for
+    QStringList editedFiles;      ///< buffers whose references were rewritten
+    QStringList leftBehind;       ///< references that have to be fixed by hand
+    QStringList errors;
+};
+
 /// A NixOS configuration tree: either a flake with several `nixosConfigurations`
 /// or a plain `configuration.nix`. Owns the `NixFile` buffers so that every page
 /// of the UI edits the same in-memory state.
@@ -90,6 +134,35 @@ public:
 
     /// Rescans the tree for hosts and modules without dropping edits.
     void rescan();
+
+    // ── File management ──────────────────────────────────────────────────────
+
+    /// True when `absPath` lies inside the project root. The root itself does
+    /// not count, so nothing here can ever delete the tree it is managing.
+    bool containsPath(const QString &absPath) const;
+
+    /// Every path literal in the tree that resolves to `absPath`: import lists,
+    /// module lists and plain bindings alike. A directory matches both a literal
+    /// naming it (Nix reads its `default.nix`) and any literal naming a file
+    /// inside it.
+    QVector<FileReference> referencesTo(const QString &absPath);
+
+    /// What `absPath` is used for, as a short phrase for confirmation prompts
+    /// ("the entry file of host t420"). Empty when it plays no special role.
+    QString describeRole(const QString &absPath) const;
+
+    /// The `.nix` files at or below `absPath`, for previewing a deletion.
+    QStringList nixFilesUnder(const QString &absPath) const;
+
+    /// Deletes files and directories, first rewriting the imports that point at
+    /// them. Everything that happened — or could not happen — is reported in
+    /// `result`; paths in `result->needsPrivilege` need an elevated `rm`, which
+    /// the caller runs through the CommandRunner.
+    bool deleteFiles(const DeleteRequest &request, DeleteResult *result);
+
+    /// Drops the cached buffer for `absPath` and, when it is a directory, for
+    /// everything below it. Call this after removing a path behind our back.
+    void forgetFile(const QString &absPath);
 
 signals:
     void changed();

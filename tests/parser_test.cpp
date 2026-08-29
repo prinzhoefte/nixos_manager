@@ -3,6 +3,7 @@
 #include "core/ConfigProject.h"
 #include "core/NixFile.h"
 #include "core/NixLexer.h"
+#include "core/SystemOps.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -497,6 +498,257 @@ static void testSingleFileProject()
         CHECK_EQ(project.modules().at(0).name, QStringLiteral("desktop"));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+/// A small flake tree: two hosts, three modules, one of them pulled in by the
+/// flake itself.
+struct TempTree {
+    QTemporaryDir dir;
+
+    QString root() const { return dir.path(); }
+    QString at(const QString &rel) const { return QDir(dir.path()).absoluteFilePath(rel); }
+
+    static void write(const QString &path, const QString &content)
+    {
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QFile f(path);
+        if (f.open(QIODevice::WriteOnly | QIODevice::Text))
+            QTextStream(&f) << content;
+    }
+
+    TempTree()
+    {
+        write(at(QStringLiteral("flake.nix")), R"NIX({
+    inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+
+    outputs = { self, nixpkgs, ... }@inputs:
+    let mkHost = hostModule: nixpkgs.lib.nixosSystem {
+            modules = [
+                hostModule
+                ./modules/common/nix.nix
+            ];
+        };
+    in {
+        nixosConfigurations = {
+            main-pc = mkHost ./hosts/main-pc;
+            t420    = mkHost ./hosts/t420;
+        };
+    };
+}
+)NIX");
+        write(at(QStringLiteral("hosts/main-pc/default.nix")), R"NIX({ ... }:
+{
+    imports = [
+        ../../modules/desktop/plasma6.nix
+        ../../modules/desktop/fonts.nix
+    ];
+
+    networking.hostName = "main-pc";
+}
+)NIX");
+        write(at(QStringLiteral("hosts/t420/default.nix")), R"NIX({ ... }:
+{
+    imports = [
+        ../../modules/desktop/plasma6.nix
+    ];
+
+    networking.hostName = "t420";
+}
+)NIX");
+        write(at(QStringLiteral("modules/common/nix.nix")),
+            QStringLiteral("{ ... }:\n{\n}\n"));
+        write(at(QStringLiteral("modules/desktop/plasma6.nix")),
+            QStringLiteral("{ ... }:\n{\n}\n"));
+        write(at(QStringLiteral("modules/desktop/fonts.nix")),
+            QStringLiteral("{ ... }:\n{\n}\n"));
+    }
+};
+
+} // namespace
+
+static void testFileReferences()
+{
+    TempTree tree;
+    CHECK(tree.dir.isValid());
+
+    ConfigProject project;
+    QString err;
+    CHECK(project.open(tree.root(), &err));
+
+    // A module imported by two hosts is reported once per host.
+    const auto plasma = project.referencesTo(tree.at(QStringLiteral("modules/desktop/plasma6.nix")));
+    CHECK_EQ(plasma.size(), qsizetype(2));
+    for (const FileReference &r : plasma) {
+        CHECK(r.kind == ReferenceKind::Import);
+        CHECK(r.rewritable());
+        CHECK(r.enabled);
+        CHECK(r.relFile.startsWith(QStringLiteral("hosts/")));
+        CHECK_EQ(r.literal, QStringLiteral("../../modules/desktop/plasma6.nix"));
+    }
+
+    // The flake's shared `modules = [ … ]` counts too, and is not an import.
+    const auto common = project.referencesTo(tree.at(QStringLiteral("modules/common/nix.nix")));
+    CHECK_EQ(common.size(), qsizetype(1));
+    if (!common.isEmpty()) {
+        CHECK_EQ(common.first().relFile, QStringLiteral("flake.nix"));
+        CHECK(common.first().kind == ReferenceKind::ListEntry);
+        CHECK(common.first().rewritable());
+        CHECK(common.first().owner.endsWith(QStringLiteral("modules")));
+    }
+
+    // A host directory is named by `main-pc = mkHost ./hosts/main-pc;`, which is
+    // a binding rather than a list entry: reported, but never rewritten for you.
+    const auto host = project.referencesTo(tree.at(QStringLiteral("hosts/main-pc")));
+    CHECK_EQ(host.size(), qsizetype(1));
+    if (!host.isEmpty()) {
+        CHECK(host.first().kind == ReferenceKind::Binding);
+        CHECK(!host.first().rewritable());
+        CHECK(host.first().owner.endsWith(QStringLiteral("nixosConfigurations.main-pc")));
+    }
+
+    // Nothing points at a module no one imports.
+    TempTree::write(tree.at(QStringLiteral("modules/desktop/orphan.nix")),
+        QStringLiteral("{ ... }:\n{\n}\n"));
+    project.rescan();
+    CHECK_EQ(project.referencesTo(tree.at(QStringLiteral("modules/desktop/orphan.nix"))).size(),
+        qsizetype(0));
+
+    CHECK(project.containsPath(tree.at(QStringLiteral("modules/common/nix.nix"))));
+    CHECK(!project.containsPath(tree.root()));
+    CHECK(!project.containsPath(QStringLiteral("/etc/passwd")));
+}
+
+static void testDeleteFiles()
+{
+    TempTree tree;
+    CHECK(tree.dir.isValid());
+
+    ConfigProject project;
+    QString err;
+    CHECK(project.open(tree.root(), &err));
+
+    const QString plasma = tree.at(QStringLiteral("modules/desktop/plasma6.nix"));
+    const QString mainPc = tree.at(QStringLiteral("hosts/main-pc/default.nix"));
+
+    DeleteRequest request;
+    request.paths = { plasma };
+    request.toTrash = false;   // a test must not depend on a desktop trash
+    request.references = ReferenceAction::Remove;
+
+    DeleteResult result;
+    CHECK(project.deleteFiles(request, &result));
+    CHECK_EQ(result.deleted.size(), qsizetype(1));
+    CHECK_EQ(result.errors.size(), qsizetype(0));
+    CHECK(!QFileInfo::exists(plasma));
+
+    // Both hosts lost the import; the neighbouring one is untouched.
+    CHECK_EQ(result.editedFiles.size(), qsizetype(2));
+    NixFile *host = project.file(mainPc);
+    CHECK(host != nullptr);
+    if (host) {
+        CHECK(host->isDirty());
+        CHECK(!host->text().contains(QStringLiteral("plasma6")));
+        CHECK(host->text().contains(QStringLiteral("../../modules/desktop/fonts.nix")));
+    }
+    // And the module is out of the project's list.
+    for (const ModuleInfo &m : project.modules())
+        CHECK(m.name != QStringLiteral("plasma6"));
+
+    // Deleting the same path twice is reported, not repeated.
+    DeleteResult again;
+    CHECK(!project.deleteFiles(request, &again));
+    CHECK_EQ(again.errors.size(), qsizetype(1));
+}
+
+static void testDeleteKeepsCommentedImports()
+{
+    TempTree tree;
+    CHECK(tree.dir.isValid());
+
+    ConfigProject project;
+    QString err;
+    CHECK(project.open(tree.root(), &err));
+
+    const QString fonts = tree.at(QStringLiteral("modules/desktop/fonts.nix"));
+
+    DeleteRequest request;
+    request.paths = { fonts };
+    request.toTrash = false;
+    request.references = ReferenceAction::Disable;
+
+    DeleteResult result;
+    CHECK(project.deleteFiles(request, &result));
+    CHECK(!QFileInfo::exists(fonts));
+
+    NixFile *host = project.file(tree.at(QStringLiteral("hosts/main-pc/default.nix")));
+    CHECK(host != nullptr);
+    if (host)
+        CHECK(host->text().contains(QStringLiteral("#../../modules/desktop/fonts.nix")));
+}
+
+static void testDeleteDirectoryAndRefusals()
+{
+    TempTree tree;
+    CHECK(tree.dir.isValid());
+
+    ConfigProject project;
+    QString err;
+    CHECK(project.open(tree.root(), &err));
+    CHECK_EQ(project.hosts().size(), qsizetype(2));
+
+    const QString hostDir = tree.at(QStringLiteral("hosts/t420"));
+    CHECK_EQ(project.nixFilesUnder(hostDir).size(), qsizetype(1));
+
+    DeleteRequest request;
+    request.paths = { hostDir };
+    request.toTrash = false;
+    request.references = ReferenceAction::Remove;
+
+    DeleteResult result;
+    CHECK(project.deleteFiles(request, &result));
+    CHECK(!QFileInfo::exists(hostDir));
+
+    // flake.nix still registers the host — that is the caller's job — but the
+    // shared modules list no longer mentions anything below the directory.
+    NixFile *flake = project.file(tree.at(QStringLiteral("flake.nix")));
+    CHECK(flake != nullptr);
+    if (flake)
+        CHECK(flake->text().contains(QStringLiteral("t420    = mkHost ./hosts/t420;")));
+    CHECK_EQ(result.leftBehind.size(), qsizetype(1));
+    if (!result.leftBehind.isEmpty())
+        CHECK(result.leftBehind.first().contains(QStringLiteral("nixosConfigurations.t420")));
+
+    // Paths outside the tree are refused rather than deleted.
+    QTemporaryDir outside;
+    CHECK(outside.isValid());
+    const QString stranger = QDir(outside.path()).absoluteFilePath(QStringLiteral("other.nix"));
+    TempTree::write(stranger, QStringLiteral("{ ... }:\n{\n}\n"));
+
+    DeleteRequest refused;
+    refused.paths = { stranger };
+    refused.toTrash = false;
+    DeleteResult refusedResult;
+    CHECK(!project.deleteFiles(refused, &refusedResult));
+    CHECK_EQ(refusedResult.errors.size(), qsizetype(1));
+    CHECK(QFileInfo::exists(stranger));
+}
+
+static void testRemovePathAsRootGuard()
+{
+    // A nested path inside the tree is fine.
+    const auto ok = SystemOps::removePathAsRoot(QStringLiteral("/etc/nixos/modules/foo.nix"));
+    CHECK_EQ(ok.program, QStringLiteral("rm"));
+    CHECK(ok.args.contains(QStringLiteral("--")));
+
+    // Anything that could take the machine with it is refused.
+    for (const QString &bad : { QString(), QStringLiteral("/"), QStringLiteral("/etc"),
+             QStringLiteral("relative/path"), QStringLiteral("/etc/nixos/..") }) {
+        CHECK(SystemOps::removePathAsRoot(bad).program.isEmpty());
+    }
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
@@ -510,6 +762,11 @@ int main(int argc, char **argv)
     testOptionEditing();
     testFlakeHosts();
     testSingleFileProject();
+    testFileReferences();
+    testDeleteFiles();
+    testDeleteKeepsCommentedImports();
+    testDeleteDirectoryAndRefusals();
+    testRemovePathAsRootGuard();
 
     QTextStream(stdout) << (g_failures == 0 ? "PASS" : "FAIL") << ": " << (g_checks - g_failures)
                         << "/" << g_checks << " checks passed\n";

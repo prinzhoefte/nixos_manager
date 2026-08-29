@@ -1,5 +1,6 @@
 #include "HostsPage.h"
 
+#include "FileOps.h"
 #include "Theme.h"
 #include "core/ConfigProject.h"
 #include "core/NixFile.h"
@@ -93,6 +94,15 @@ void HostsPage::buildUi()
     Theme::makePrimary(m_newHost);
     connect(m_newHost, &QPushButton::clicked, this, &HostsPage::createHost);
     leftLayout->addWidget(m_newHost);
+
+    m_deleteHost = new QPushButton(tr("Delete host…"), left);
+    m_deleteHost->setIcon(Theme::icon(QStringLiteral("trash")));
+    m_deleteHost->setProperty("danger", true);
+    m_deleteHost->setToolTip(
+        tr("Delete this host's files and unregister it from flake.nix."));
+    m_deleteHost->setEnabled(false);
+    connect(m_deleteHost, &QPushButton::clicked, this, &HostsPage::deleteHost);
+    leftLayout->addWidget(m_deleteHost);
 
     splitter->addWidget(left);
 
@@ -266,6 +276,7 @@ void HostsPage::reloadHostDetails()
     m_stateVersion->setEnabled(valid);
     m_openHostFile->setEnabled(valid);
     m_rebuild->setEnabled(valid);
+    m_deleteHost->setEnabled(valid && m_ctx.project->kind() == ConfigProject::Flake);
 
     if (!valid) {
         m_hostName->clear();
@@ -881,12 +892,99 @@ void HostsPage::createHost()
     }
 
     emit statusMessage(tr("Created host %1").arg(hostDirName));
-    emit configModified();
+    emit projectStructureChanged();
     emit openFileRequested(entryFile);
+}
+
+QString HostsPage::hostRegistration(const QString &name)
+{
+    ConfigProject *project = m_ctx.project;
+    if (!project || project->kind() != ConfigProject::Flake)
+        return QString();
+    NixFile *flake = project->file(project->flakeFile());
+    if (!flake)
+        return QString();
+
+    const QString suffix = QStringLiteral("nixosConfigurations.") + name;
+    for (const AttrEntry &a : flake->attrs())
+        if (a.path == suffix || a.path.endsWith(QLatin1Char('.') + suffix))
+            return a.path;
+    return QString();
+}
+
+void HostsPage::deleteHost()
+{
+    ConfigProject *project = m_ctx.project;
+    const QString name = currentHost();
+    const HostInfo *host = project ? project->host(name) : nullptr;
+    if (!host)
+        return;
+
+    if (project->kind() != ConfigProject::Flake) {
+        QMessageBox::information(this, tr("Delete host"),
+            tr("This configuration is a single configuration.nix, so its one host cannot be "
+               "deleted without deleting the configuration itself."));
+        return;
+    }
+
+    // The whole directory goes only when it belongs to this host alone — a
+    // `hosts/laptop.nix` style layout puts every host in one directory, and a
+    // host whose entry file sits in the project root has no directory of its
+    // own at all.
+    const QString dir = QDir::cleanPath(host->dir);
+    const QString entry = QDir::cleanPath(host->entryFile);
+    bool ownsDirectory = project->containsPath(dir)
+        && QDir(dir).absoluteFilePath(QStringLiteral("default.nix")) == entry;
+    for (const HostInfo &other : project->hosts())
+        if (other.name != name && QDir::cleanPath(other.dir) == dir)
+            ownsDirectory = false;
+
+    const QStringList paths = ownsDirectory ? QStringList{ dir } : QStringList{ entry };
+
+    // Look the registration up before anything is deleted; afterwards the host
+    // is no longer in the project's list.
+    const QString registration = hostRegistration(name);
+
+    QStringList notes;
+    if (!registration.isEmpty()) {
+        notes << tr("The %1 binding in flake.nix is removed as well.").arg(registration);
+    } else {
+        notes << tr("No nixosConfigurations.%1 binding was found in flake.nix, so nothing "
+                    "there has to be unregistered.")
+                     .arg(name);
+    }
+    if (project->hosts().size() == 1)
+        notes << tr("This is the only host in the flake; nothing will be left to build.");
+
+    const FileOps::DeleteOutcome outcome
+        = FileOps::deletePaths(this, m_ctx, paths, notes.join(QLatin1Char(' ')));
+    if (!outcome.changed)
+        return;
+
+    bool unregistered = registration.isEmpty();
+    if (!registration.isEmpty()) {
+        if (NixFile *flake = project->file(project->flakeFile()))
+            unregistered = flake->removeAttribute(registration);
+    }
+
+    refresh();
+    if (!outcome.status.isEmpty())
+        emit statusMessage(outcome.status);
+    emit projectStructureChanged();
+    if (outcome.needsSave)
+        FileOps::whenIdle(m_ctx, this, [this] { emit saveRequested(); });
+
+    if (!unregistered) {
+        QMessageBox::warning(this, tr("Delete host"),
+            tr("%1 is gone, but its %2 binding could not be removed from flake.nix. "
+               "Take it out by hand in the Editor tab.")
+                .arg(name, registration));
+    }
 }
 
 void HostsPage::applyTheme()
 {
+    m_deleteHost->setIcon(Theme::icon(QStringLiteral("trash")));
     m_newHost->setIcon(Theme::icon(QStringLiteral("add"), Theme::colors().textOnBrand));
     Theme::makePrimary(m_newHost);
     m_rebuild->setIcon(Theme::icon(QStringLiteral("run"), Theme::colors().textOnBrand));

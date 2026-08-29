@@ -34,6 +34,10 @@ signals:
     void openFileRequested(const QString &absPath);
     void rebuildRequested(const QString &host);
     void configModified();
+    /// Files appeared or disappeared, so every page has to re-read the tree.
+    void projectStructureChanged();
+    /// Rewritten buffers should be written to disk now.
+    void saveRequested();
     void statusMessage(const QString &text);
 
 private:
@@ -48,6 +52,10 @@ private:
     void commitIdentity();
     void applyModuleFilter(const QString &text);
     void createHost();
+    void deleteHost();
+    /// Path of the `nixosConfigurations.<name>` binding in flake.nix, empty
+    /// when the host is not registered there.
+    QString hostRegistration(const QString &name);
 
     /// Section header a module should be filed under, derived from its category.
     QString sectionForCategory(const QString &category) const;
@@ -67,6 +75,7 @@ private:
     QPushButton *m_openHostFile = nullptr;
     QPushButton *m_rebuild = nullptr;
     QPushButton *m_newHost = nullptr;
+    QPushButton *m_deleteHost = nullptr;
 };
 
 } // namespace nixm

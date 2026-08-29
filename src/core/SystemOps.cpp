@@ -418,5 +418,23 @@ CommandRunner::Step installFileAsRoot(const QString &tempPath, const QString &de
     return s;
 }
 
+CommandRunner::Step removePathAsRoot(const QString &path)
+{
+    CommandRunner::Step s;
+    const QString clean = QDir::cleanPath(path);
+
+    // `rm -r` as root is unforgiving, so hand it nothing but a genuinely nested
+    // path: no empty string, no filesystem root, no top-level directory.
+    if (clean.isEmpty() || !clean.startsWith(QLatin1Char('/'))
+        || clean.count(QLatin1Char('/')) < 2 || clean.endsWith(QLatin1String("/..")))
+        return s;
+
+    s.label = QStringLiteral("remove %1").arg(clean);
+    s.program = QStringLiteral("rm");
+    s.args << QStringLiteral("-rf") << QStringLiteral("--") << clean;
+    s.privilege = CommandRunner::AsRoot;
+    return s;
+}
+
 } // namespace SystemOps
 } // namespace nixm

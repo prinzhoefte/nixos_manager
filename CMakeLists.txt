@@ -60,6 +60,8 @@ if(NIXOS_MANAGER_BUILD_GUI)
         src/ui/NixHighlighter.h
         src/ui/LogPane.cpp
         src/ui/LogPane.h
+        src/ui/FileOps.cpp
+        src/ui/FileOps.h
         src/ui/HostsPage.cpp
         src/ui/HostsPage.h
         src/ui/ModulesPage.cpp

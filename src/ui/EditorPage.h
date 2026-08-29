@@ -6,6 +6,7 @@
 
 class QLabel;
 class QPlainTextEdit;
+class QPoint;
 class QPushButton;
 class QSortFilterProxyModel;
 class QTimer;
@@ -37,6 +38,10 @@ public slots:
 
 signals:
     void configModified();
+    /// Files appeared or disappeared, so every page has to re-read the tree.
+    void projectStructureChanged();
+    /// Rewritten buffers should be written to disk now.
+    void saveRequested();
     void statusMessage(const QString &text);
 
 private:
@@ -44,6 +49,14 @@ private:
     void onTreeActivated(const QModelIndex &index);
     void commitToBuffer();
     void reloadFromDisk();
+    void showTreeMenu(const QPoint &pos);
+    /// Deletes what is selected in the file tree, imports included.
+    void deleteSelected();
+    void deletePaths(const QStringList &paths);
+    /// Empties the editor pane after its file went away.
+    void closeFile();
+    /// Absolute paths selected in the file tree.
+    QStringList selectedPaths() const;
 
     AppContext m_ctx;
     QString m_currentPath;
@@ -55,6 +68,7 @@ private:
     NixHighlighter *m_highlighter = nullptr;
     QLabel *m_header = nullptr;
     QPushButton *m_reload = nullptr;
+    QPushButton *m_delete = nullptr;
     QTimer *m_debounce = nullptr;
 };
 
